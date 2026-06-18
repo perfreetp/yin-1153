@@ -25,6 +25,11 @@ import {
   Clock,
   ShieldAlert,
   ExternalLink,
+  GitBranch,
+  PlayCircle,
+  CheckSquare,
+  Share2,
+  XCircle,
 } from 'lucide-react';
 
 interface WorkCardDetailProps {
@@ -44,6 +49,7 @@ export default function WorkCardDetail({
     getPreShiftFormById,
     getDailyRisksByFormId,
     getRiskBySourceFormId,
+    getRecordsByRiskId,
   } = useRiskStore();
 
   const form = formId ? getPreShiftFormById(formId) : null;
@@ -57,6 +63,77 @@ export default function WorkCardDetail({
     const closed = trackingRisks.filter((r) => r.status === 'closed').length;
     return { checked, promoted, total: dailyRisks.length, inTracking, closed };
   }, [dailyRisks, trackingRisks]);
+
+  const trackingRisksWithTimeline = useMemo(() => {
+    return trackingRisks.map((risk) => {
+      const dailyRisk = dailyRisks.find((d) => d.promotedRiskId === risk.id);
+      const records = getRecordsByRiskId(risk.id);
+      const timeline: Array<{
+        stage: 'confirmed' | 'promoted' | 'processing' | 'closed';
+        time: string;
+        title: string;
+        description: string;
+        icon: any;
+        color: string;
+        completed: boolean;
+      }> = [];
+
+      if (dailyRisk) {
+        timeline.push({
+          stage: 'confirmed',
+          time: form?.createdAt || risk.createdAt,
+          title: '班前确认',
+          description: dailyRisk.isChecked ? '已确认' : '未确认',
+          icon: CheckSquare,
+          color: dailyRisk.isChecked ? 'text-risk-low' : 'text-dashboard-muted',
+          completed: dailyRisk.isChecked,
+        });
+      }
+
+      timeline.push({
+        stage: 'promoted',
+        time: risk.createdAt,
+        title: '转入跟踪',
+        description: '从班前确认转入闭环跟踪',
+        icon: Share2,
+        color: 'text-accent-blue',
+        completed: true,
+      });
+
+      const processingRecord = records.find((r) => r.reviewResult.includes('处理中') || r.reviewResult.includes('跟进'));
+      const closedRecord = records.find((r) => r.reviewResult.includes('合格') || r.reviewResult.includes('闭环'));
+
+      if (processingRecord || risk.status === 'processing' || risk.status === 'closed') {
+        timeline.push({
+          stage: 'processing',
+          time: processingRecord?.handledAt || risk.createdAt,
+          title: '处理中',
+          description: processingRecord
+            ? `${processingRecord.handler}：${processingRecord.reviewResult}`
+            : '正在跟进处理',
+          icon: PlayCircle,
+          color: 'text-risk-medium',
+          completed: risk.status === 'processing' || risk.status === 'closed',
+        });
+      }
+
+      if (closedRecord || risk.status === 'closed') {
+        timeline.push({
+          stage: 'closed',
+          time: closedRecord?.handledAt || risk.releaseDeadline,
+          title: '已闭环',
+          description: closedRecord
+            ? `${closedRecord.handler}：${closedRecord.reviewResult}`
+            : '已完成闭环',
+          icon: CheckCircle2,
+          color: 'text-risk-low',
+          completed: risk.status === 'closed',
+        });
+      }
+
+      return { risk, dailyRisk, records, timeline };
+    });
+  }, [trackingRisks, dailyRisks, form, getRecordsByRiskId]);
 
   if (!form) return null;
 
@@ -152,19 +229,19 @@ export default function WorkCardDetail({
         {trackingRisks.length > 0 && (
           <div>
             <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
-              <FileText className="w-4 h-4 text-accent-blue" />
-              转入闭环跟踪的风险
+              <GitBranch className="w-4 h-4 text-accent-blue" />
+              风险处理完整链路
             </h4>
-            <div className="bg-dashboard-surface border border-dashboard-border rounded-lg overflow-hidden max-h-[240px] overflow-y-auto">
-              <div className="divide-y divide-dashboard-border/50">
-                {trackingRisks.map((risk) => (
-                  <TrackingRiskItem
-                    key={risk.id}
-                    risk={risk}
-                    onGoToTracking={onGoToTracking}
-                  />
-                ))}
-              </div>
+            <div className="space-y-4">
+              {trackingRisksWithTimeline.map(({ risk, dailyRisk, records, timeline }) => (
+                <RiskTimelineCard
+                  key={risk.id}
+                  risk={risk}
+                  dailyRisk={dailyRisk}
+                  timeline={timeline}
+                  onGoToTracking={onGoToTracking}
+                />
+              ))}
             </div>
           </div>
         )}
@@ -285,6 +362,133 @@ function DailyRiskItem({
         {!promotedRisk && (
           <span className="text-xs text-dashboard-muted">未转入</span>
         )}
+      </div>
+    </div>
+  );
+}
+
+function RiskTimelineCard({
+  risk,
+  dailyRisk,
+  timeline,
+  onGoToTracking,
+}: {
+  risk: RiskCardData;
+  dailyRisk?: DailyRisk;
+  timeline: Array<{
+    stage: string;
+    time: string;
+    title: string;
+    description: string;
+    icon: any;
+    color: string;
+    completed: boolean;
+  }>;
+  onGoToTracking?: (riskId: string) => void;
+}) {
+  const location = LOCATIONS.find((l) => l.id === risk.locationId);
+  const isEscalated = risk.escalationLevel && risk.escalationLevel !== 'none';
+
+  return (
+    <div className="bg-dashboard-card rounded-lg border border-dashboard-border overflow-hidden">
+      <div className="p-4 border-b border-dashboard-border/50">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-2 flex-wrap">
+              <Badge variant="risk" level={risk.level} size="sm" />
+              <Badge status={risk.status} size="sm" />
+              {risk.isOverdue && (
+                <span className="px-1.5 py-0.5 bg-risk-high text-white text-[10px] font-medium rounded">
+                  超时
+                </span>
+              )}
+              {isEscalated && (
+                <span className="px-1.5 py-0.5 bg-orange-500/20 text-orange-400 text-[10px] font-medium rounded flex items-center gap-0.5">
+                  <ShieldAlert size={10} />
+                  {risk.escalationLevel === 'manager' ? '值班经理' : '质量安全主管'}
+                </span>
+              )}
+            </div>
+            <div className="text-sm font-medium text-white mb-1">
+              {getRiskTypeLabel(risk.type)}
+              {risk.aircraftNo && <span className="text-dashboard-muted ml-2">· {risk.aircraftNo}</span>}
+            </div>
+            <div className="flex items-center gap-3 text-xs text-dashboard-muted flex-wrap">
+              <span>{location?.name || '-'}</span>
+              <span className="flex items-center gap-1">
+                <Clock size={10} />
+                {risk.releaseDeadline}
+              </span>
+              {risk.team && <span>班组：{risk.team}</span>}
+            </div>
+            {dailyRisk && (
+              <div className="mt-2 pt-2 border-t border-dashboard-border/30 text-xs text-dashboard-muted">
+                <span className="text-dashboard-text font-medium">来源风险描述：</span>
+                {dailyRisk.description}
+              </div>
+            )}
+          </div>
+          {onGoToTracking && (
+            <button
+              onClick={() => onGoToTracking(risk.id)}
+              className="flex-shrink-0 flex items-center gap-1 px-3 py-1.5 text-xs bg-accent-blue/10 text-accent-blue rounded-md hover:bg-accent-blue/20 transition-colors"
+            >
+              去处理
+              <ArrowRight size={12} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="p-4">
+        <div className="text-xs text-dashboard-muted mb-3 flex items-center gap-1.5">
+          <GitBranch size={12} />
+          处理链路时间线
+        </div>
+        <div className="relative pl-5">
+          {timeline.map((step, idx) => (
+            <div key={step.stage} className="relative pb-4 last:pb-0">
+              {idx < timeline.length - 1 && (
+                <div
+                  className={cn(
+                    'absolute left-[9px] top-5 w-0.5 h-full',
+                    step.completed ? 'bg-dashboard-border' : 'bg-dashboard-border/30'
+                  )}
+                />
+              )}
+              <div className="relative">
+                <div
+                  className={cn(
+                    'absolute -left-5 top-0 w-[18px] h-[18px] rounded-full flex items-center justify-center border-2',
+                    step.completed
+                      ? 'bg-dashboard-card border-current'
+                      : 'bg-dashboard-bg border-dashed border-dashboard-border'
+                  )}
+                >
+                  <step.icon size={10} className={step.color} />
+                </div>
+                <div className="ml-2">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className={cn('text-xs font-medium', step.color)}>
+                      {step.title}
+                    </span>
+                    {step.completed ? (
+                      <CheckCircle2 size={12} className="text-risk-low" />
+                    ) : (
+                      <XCircle size={12} className="text-dashboard-muted" />
+                    )}
+                  </div>
+                  <div className="text-xs text-dashboard-text/80 mb-0.5">
+                    {step.description}
+                  </div>
+                  <div className="text-[10px] text-dashboard-muted font-mono">
+                    {step.time}
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );

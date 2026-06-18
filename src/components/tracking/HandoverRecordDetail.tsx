@@ -149,6 +149,39 @@ export default function HandoverRecordDetail({
 
   if (!record) return null;
 
+  const totalRisks = record.receivedRiskIds.length + record.unreceivedRiskIds.length;
+  const initialReceived = (() => {
+    if (!record.supplementaryRecords || record.supplementaryRecords.length === 0) {
+      return record.receivedRiskIds.length;
+    }
+    const totalSupplemented = record.supplementaryRecords.reduce(
+      (sum, rec) => sum + rec.riskIds.length,
+      0
+    );
+    return record.receivedRiskIds.length - totalSupplemented;
+  })();
+  const supplementedCount = record.receivedRiskIds.length - initialReceived;
+  const finalReceiveRate = totalRisks > 0 ? Math.round((record.receivedRiskIds.length / totalRisks) * 100) : 0;
+
+  const supplementDuration = (() => {
+    if (!record.supplementaryRecords || record.supplementaryRecords.length === 0) return null;
+    const lastSup = record.supplementaryRecords[record.supplementaryRecords.length - 1];
+    const handoverTime = new Date(record.handoverTime.replace(/-/g, '/')).getTime();
+    const lastSupTime = new Date(lastSup.time.replace(/-/g, '/')).getTime();
+    const diffMins = Math.round((lastSupTime - handoverTime) / (1000 * 60));
+    if (diffMins < 60) return `${diffMins} 分钟`;
+    const hours = Math.floor(diffMins / 60);
+    const mins = diffMins % 60;
+    return mins > 0 ? `${hours} 小时 ${mins} 分钟` : `${hours} 小时`;
+  })();
+
+  const qualityGrade = (() => {
+    if (finalReceiveRate >= 95) return { label: '优秀', color: 'text-risk-low', bg: 'bg-risk-lowBg' };
+    if (finalReceiveRate >= 80) return { label: '良好', color: 'text-risk-medium', bg: 'bg-risk-mediumBg' };
+    if (finalReceiveRate >= 60) return { label: '一般', color: 'text-orange-400', bg: 'bg-orange-500/20' };
+    return { label: '需改进', color: 'text-risk-high', bg: 'bg-risk-highBg' };
+  })();
+
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="交接记录详情" size="xl">
       <div className="space-y-4">
@@ -189,6 +222,67 @@ export default function HandoverRecordDetail({
             <p className="text-sm text-dashboard-text">{record.remarks}</p>
           </div>
         )}
+
+        <div className="bg-dashboard-surface rounded-lg p-4 border border-dashboard-border">
+          <div className="flex items-center gap-2 mb-3">
+            <History size={16} className="text-accent-blue" />
+            <h4 className="text-sm font-semibold text-white">交接复盘统计</h4>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+            <div className="bg-dashboard-card rounded-lg p-3 border border-dashboard-border">
+              <div className="text-xs text-dashboard-muted mb-1">最终接收率</div>
+              <div className={cn('text-2xl font-bold font-display', qualityGrade.color)}>
+                {finalReceiveRate}%
+              </div>
+              <span className={cn('text-xs px-2 py-0.5 rounded-full mt-1 inline-block', qualityGrade.color, qualityGrade.bg)}>
+                {qualityGrade.label}
+              </span>
+            </div>
+            <div className="bg-dashboard-card rounded-lg p-3 border border-dashboard-border">
+              <div className="text-xs text-dashboard-muted mb-1">应接总数</div>
+              <div className="text-2xl font-bold font-display text-white">{totalRisks}</div>
+              <div className="text-xs text-dashboard-muted mt-1">
+                项风险
+              </div>
+            </div>
+            <div className="bg-dashboard-card rounded-lg p-3 border border-dashboard-border">
+              <div className="text-xs text-dashboard-muted mb-1">初始已接收</div>
+              <div className="text-xl font-bold font-display text-risk-low">{initialReceived}</div>
+              <div className="text-xs text-dashboard-muted mt-1">
+                补接收 <span className="text-accent-blue">+{supplementedCount}</span>
+              </div>
+            </div>
+            <div className="bg-dashboard-card rounded-lg p-3 border border-dashboard-border">
+              <div className="text-xs text-dashboard-muted mb-1">补接收用时</div>
+              <div className="text-xl font-bold font-display text-white">
+                {supplementDuration || '-'}
+              </div>
+              <div className="text-xs text-dashboard-muted mt-1">
+                共 {record.supplementaryRecords?.length || 0} 次补接收
+              </div>
+            </div>
+            <div className="bg-dashboard-card rounded-lg p-3 border border-dashboard-border">
+              <div className="text-xs text-dashboard-muted mb-1">未接收剩余</div>
+              <div className={cn(
+                'text-2xl font-bold font-display',
+                record.unreceivedRiskIds.length > 0 ? 'text-risk-high' : 'text-risk-low'
+              )}>
+                {record.unreceivedRiskIds.length}
+              </div>
+              <div className="text-xs text-dashboard-muted mt-1">
+                项需持续跟进
+              </div>
+            </div>
+          </div>
+          {record.unreceivedRiskIds.length > 0 && (
+            <div className="mt-3 flex items-start gap-2 p-2.5 bg-risk-highBg/15 rounded-lg text-xs text-risk-high">
+              <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+              <span>
+                {record.unreceivedRiskIds.length} 项风险仍未接收，需值班经理协调跟进闭环，明确责任人和完成时限
+              </span>
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-1 p-1 bg-dashboard-card rounded-lg border border-dashboard-border">

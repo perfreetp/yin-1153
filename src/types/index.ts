@@ -31,6 +31,7 @@ export interface RiskCardData {
   escalationLevel?: EscalationLevel;
   escalationAssignee?: string;
   escalatedAt?: string;
+  escalationIsLocked?: boolean;
   escalationHistory?: Array<{
     id: string;
     level: EscalationLevel;

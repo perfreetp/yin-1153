@@ -29,9 +29,11 @@ export function getEscalationLevel(
   isOverdue: boolean | undefined,
   releaseDeadline: string,
   status: RiskStatus,
-  currentLevel: EscalationLevel = 'none'
+  currentLevel: EscalationLevel = 'none',
+  isLocked: boolean = false
 ): EscalationLevel {
   if (status === 'closed') return 'none';
+  if (isLocked) return currentLevel;
   if (!isOverdue) return currentLevel === 'none' ? 'none' : currentLevel;
   const deadline = new Date(releaseDeadline.replace(/-/g, '/')).getTime();
   if (Number.isNaN(deadline)) return currentLevel === 'none' ? 'manager' : currentLevel;
@@ -77,6 +79,7 @@ interface RiskState {
 
   escalateRisk: (riskId: string, level: EscalationLevel, assignee: string, operator: string, note?: string) => void;
   reassignEscalation: (riskId: string, assignee: string, operator: string, note?: string) => void;
+  applyAutoEscalation: () => void;
 
   confirmHandover: (payload: {
     handoverPerson: string;
@@ -116,6 +119,18 @@ interface RiskState {
 
   generateHandoverText: () => string;
   generateReviewHandoverText: () => string;
+  getReviewData: () => {
+    overview: {
+      total: number; open: number; processing: number; closed: number;
+      high: number; overdue: number; escalated: number;
+      newPromoted: number; todayClosed: number;
+    };
+    escalatedRisks: RiskCardData[];
+    overdueRisks: RiskCardData[];
+    newPromotedRisks: RiskCardData[];
+    todayClosedRisks: RiskCardData[];
+    unreceivedFromLast: RiskCardData[];
+  };
 }
 
 export const useRiskStore = create<RiskState>()(
@@ -307,6 +322,7 @@ export const useRiskStore = create<RiskState>()(
                   escalationLevel: level,
                   escalationAssignee: assignee,
                   escalatedAt: now,
+                  escalationIsLocked: true,
                   escalationHistory: [...(r.escalationHistory || []), historyEntry],
                 }
               : r
@@ -344,6 +360,7 @@ export const useRiskStore = create<RiskState>()(
               ? {
                   ...r,
                   escalationAssignee: assignee,
+                  escalationIsLocked: true,
                   escalationHistory: [...(r.escalationHistory || []), historyEntry],
                 }
               : r
@@ -360,6 +377,85 @@ export const useRiskStore = create<RiskState>()(
             },
           ],
         }));
+      },
+
+      applyAutoEscalation: () => {
+        const { riskCards, trackingRecords } = get();
+        const now = new Date().toLocaleString('zh-CN');
+        const nowTime = new Date().getTime();
+        const thresholdMs = ESCALATION_THRESHOLD_HOURS * 60 * 60 * 1000;
+
+        const updatedCards = riskCards.map((card) => {
+          if (card.status === 'closed') return card;
+          if (card.escalationIsLocked) return card;
+          if (!card.isOverdue) {
+            if (card.escalationLevel && card.escalationLevel !== 'none') {
+              return {
+                ...card,
+                escalationLevel: 'none' as EscalationLevel,
+                escalationAssignee: undefined,
+                escalatedAt: undefined,
+              };
+            }
+            return card;
+          }
+
+          const deadline = new Date(card.releaseDeadline.replace(/-/g, '/')).getTime();
+          if (Number.isNaN(deadline)) return card;
+
+          const diffMs = nowTime - deadline;
+          let targetLevel: EscalationLevel = 'none';
+          if (diffMs >= thresholdMs * 2) targetLevel = 'director';
+          else if (diffMs >= thresholdMs) targetLevel = 'manager';
+
+          const currentLevel = card.escalationLevel || 'none';
+          if (targetLevel === currentLevel) return card;
+
+          const assignee = targetLevel === 'manager' ? '值班经理（自动）' :
+            targetLevel === 'director' ? '质量安全主管（自动）' : '';
+          const levelLabel = targetLevel === 'manager' ? '值班经理' :
+            targetLevel === 'director' ? '质量安全主管' : '';
+
+          const historyEntry = targetLevel !== 'none' ? {
+            id: `eh-${Date.now()}-${card.id}`,
+            level: targetLevel,
+            assignee,
+            operator: '系统自动升级',
+            time: now,
+            note: `超时${Math.round(diffMs / (1000 * 60 * 60))}小时自动升级`,
+          } : null;
+
+          const newTrackingRecord = targetLevel !== 'none' ? {
+            id: `rec-${card.id}-autoesc-${Date.now()}`,
+            riskId: card.id,
+            handler: '系统自动升级',
+            rectification: `超时${Math.round(diffMs / (1000 * 60 * 60))}小时自动升级至${levelLabel}`,
+            reviewResult: `已升级至${levelLabel}跟进`,
+            handledAt: now,
+          } : null;
+
+          if (newTrackingRecord) {
+            trackingRecords.push(newTrackingRecord);
+          }
+
+          return {
+            ...card,
+            escalationLevel: targetLevel,
+            escalationAssignee: targetLevel !== 'none' ? assignee : undefined,
+            escalatedAt: targetLevel !== 'none' ? now : undefined,
+            escalationHistory: historyEntry
+              ? [...(card.escalationHistory || []), historyEntry]
+              : card.escalationHistory,
+          };
+        });
+
+        const hasChanges = updatedCards.some((c, i) => c !== riskCards[i]);
+        if (hasChanges) {
+          set((state) => ({
+            riskCards: updatedCards,
+            trackingRecords: [...trackingRecords],
+          }));
+        }
       },
 
       confirmHandover: (payload) => {
@@ -435,7 +531,9 @@ export const useRiskStore = create<RiskState>()(
       getFilteredRiskCards: () => {
         const { riskCards, selectedBaseId, selectedLocationType, selectedLocationId } = get();
 
-        return riskCards.filter((card) => {
+        get().applyAutoEscalation();
+
+        return get().riskCards.filter((card) => {
           const location = LOCATIONS.find((l) => l.id === card.locationId);
           if (!location) return false;
           if (location.baseId !== selectedBaseId) return false;
@@ -840,6 +938,57 @@ export const useRiskStore = create<RiskState>()(
         text += '═══════════════════════════════════════════════\n';
 
         return text;
+      },
+
+      getReviewData: () => {
+        const { getFilteredRiskCards, getOverdueRiskCards, getEscalatedRiskCards, getRecordsByRiskId } = get();
+        const { preShiftForms, dailyRisks } = get();
+
+        const allRisks = getFilteredRiskCards();
+        const openRisks = allRisks.filter((r) => r.status !== 'closed');
+        const closedRisks = allRisks.filter((r) => r.status === 'closed');
+        const overdueRisks = getOverdueRiskCards(true);
+        const escalatedRisks = getEscalatedRiskCards(true);
+        const highRisks = openRisks.filter((r) => r.level === 'high');
+
+        const todayStr = new Date().toLocaleDateString('zh-CN');
+        const todayClosed = closedRisks.filter((r) => {
+          const records = getRecordsByRiskId(r.id);
+          return records.length > 0 && records.some((rec) => rec.handledAt.startsWith(todayStr));
+        });
+
+        const todayForms = preShiftForms.filter((f) => f.createdAt.startsWith(todayStr));
+        const newPromotedIds = new Set<string>();
+        todayForms.forEach((f) => {
+          const risks = dailyRisks.filter((d) => d.formId === f.id && d.promotedRiskId);
+          risks.forEach((r) => r.promotedRiskId && newPromotedIds.add(r.promotedRiskId));
+        });
+        const newPromotedRisks = openRisks.filter((r) => newPromotedIds.has(r.id));
+
+        const unreceivedFromLast = (() => {
+          const lastRecord = get().getHandoverRecords(true).slice(-1)[0];
+          if (!lastRecord) return [] as RiskCardData[];
+          return openRisks.filter((r) => lastRecord.unreceivedRiskIds.includes(r.id));
+        })();
+
+        return {
+          overview: {
+            total: allRisks.length,
+            open: allRisks.filter(r => r.status === 'open').length,
+            processing: allRisks.filter(r => r.status === 'processing').length,
+            closed: closedRisks.length,
+            high: highRisks.length,
+            overdue: overdueRisks.length,
+            escalated: escalatedRisks.length,
+            newPromoted: newPromotedRisks.length,
+            todayClosed: todayClosed.length,
+          },
+          escalatedRisks,
+          overdueRisks,
+          newPromotedRisks,
+          todayClosedRisks: todayClosed,
+          unreceivedFromLast,
+        };
       },
     }),
     {
