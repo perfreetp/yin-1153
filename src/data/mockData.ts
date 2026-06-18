@@ -1,0 +1,193 @@
+import type { Base, Location, RiskCardData, RiskMeasure, RiskTypeMeta, LocationTypeMeta } from '@/types';
+
+export const BASES: Base[] = [
+  { id: 'base-1', name: '北京首都基地' },
+  { id: 'base-2', name: '上海浦东基地' },
+  { id: 'base-3', name: '广州白云基地' },
+];
+
+export const LOCATIONS: Location[] = [
+  { id: 'loc-1', baseId: 'base-1', type: 'hangar', name: '1号机库' },
+  { id: 'loc-2', baseId: 'base-1', type: 'hangar', name: '2号机库' },
+  { id: 'loc-3', baseId: 'base-1', type: 'apron', name: 'A区停机坪' },
+  { id: 'loc-4', baseId: 'base-1', type: 'apron', name: 'B区停机坪' },
+  { id: 'loc-5', baseId: 'base-1', type: 'line', name: 'T1航站楼航线' },
+  { id: 'loc-6', baseId: 'base-1', type: 'line', name: 'T2航站楼航线' },
+  { id: 'loc-7', baseId: 'base-2', type: 'hangar', name: '3号机库' },
+  { id: 'loc-8', baseId: 'base-2', type: 'apron', name: 'C区停机坪' },
+  { id: 'loc-9', baseId: 'base-2', type: 'line', name: 'PVG航线1' },
+];
+
+export const RISK_TYPE_META: RiskTypeMeta[] = [
+  { key: 'high_altitude', label: '高空作业', icon: 'Mountain' },
+  { key: 'power_test', label: '通电测试', icon: 'Zap' },
+  { key: 'fuel_operation', label: '燃油作业', icon: 'Fuel' },
+  { key: 'jacking', label: '顶升作业', icon: 'ArrowUpFromLine' },
+  { key: 'towing', label: '拖机作业', icon: 'Truck' },
+];
+
+export const LOCATION_TYPE_META: LocationTypeMeta[] = [
+  { key: 'hangar', label: '机库', icon: 'Building2' },
+  { key: 'apron', label: '停机坪', icon: 'MapPin' },
+  { key: 'line', label: '航线维修', icon: 'Route' },
+];
+
+export const INITIAL_RISK_CARDS: RiskCardData[] = [
+  {
+    id: 'risk-1',
+    locationId: 'loc-1',
+    type: 'high_altitude',
+    level: 'high',
+    team: '结构一班',
+    releaseDeadline: '2026-06-18 18:00',
+    status: 'open',
+    createdAt: '2026-06-18 08:30',
+    isOverdue: false,
+    aircraftNo: 'B-1234',
+  },
+  {
+    id: 'risk-2',
+    locationId: 'loc-1',
+    type: 'power_test',
+    level: 'medium',
+    team: '电子二班',
+    releaseDeadline: '2026-06-18 16:00',
+    status: 'processing',
+    createdAt: '2026-06-18 09:00',
+    isOverdue: false,
+    aircraftNo: 'B-5678',
+  },
+  {
+    id: 'risk-3',
+    locationId: 'loc-3',
+    type: 'fuel_operation',
+    level: 'high',
+    team: '动力一班',
+    releaseDeadline: '2026-06-18 12:00',
+    status: 'open',
+    createdAt: '2026-06-18 07:00',
+    isOverdue: true,
+    aircraftNo: 'B-9012',
+  },
+  {
+    id: 'risk-4',
+    locationId: 'loc-2',
+    type: 'jacking',
+    level: 'medium',
+    team: '起落架班',
+    releaseDeadline: '2026-06-18 20:00',
+    status: 'open',
+    createdAt: '2026-06-18 10:00',
+    isOverdue: false,
+    aircraftNo: 'B-3456',
+  },
+  {
+    id: 'risk-5',
+    locationId: 'loc-5',
+    type: 'towing',
+    level: 'low',
+    team: '拖车队',
+    releaseDeadline: '2026-06-18 15:30',
+    status: 'processing',
+    createdAt: '2026-06-18 11:00',
+    isOverdue: false,
+    aircraftNo: 'B-7890',
+  },
+  {
+    id: 'risk-6',
+    locationId: 'loc-4',
+    type: 'high_altitude',
+    level: 'low',
+    team: '客舱一班',
+    releaseDeadline: '2026-06-18 22:00',
+    status: 'open',
+    createdAt: '2026-06-18 10:30',
+    isOverdue: false,
+    aircraftNo: 'B-2345',
+  },
+  {
+    id: 'risk-7',
+    locationId: 'loc-1',
+    type: 'fuel_operation',
+    level: 'low',
+    team: '动力二班',
+    releaseDeadline: '2026-06-18 19:00',
+    status: 'closed',
+    createdAt: '2026-06-18 06:00',
+    isOverdue: false,
+    aircraftNo: 'B-6789',
+  },
+  {
+    id: 'risk-8',
+    locationId: 'loc-6',
+    type: 'power_test',
+    level: 'high',
+    team: '电子一班',
+    releaseDeadline: '2026-06-18 11:00',
+    status: 'open',
+    createdAt: '2026-06-18 05:00',
+    isOverdue: true,
+    aircraftNo: 'B-0123',
+  },
+  {
+    id: 'risk-9',
+    locationId: 'loc-3',
+    type: 'towing',
+    level: 'medium',
+    team: '拖车队',
+    releaseDeadline: '2026-06-18 17:00',
+    status: 'open',
+    createdAt: '2026-06-18 09:30',
+    isOverdue: false,
+    aircraftNo: 'B-4567',
+  },
+];
+
+export const INITIAL_RISK_MEASURES: RiskMeasure[] = [
+  { id: 'm-1', riskId: 'risk-1', content: '安全带检查并佩戴齐全', isClosed: true },
+  { id: 'm-2', riskId: 'risk-1', content: '高空作业许可已签署', isClosed: false },
+  { id: 'm-3', riskId: 'risk-1', content: '下方警戒区域已设置', isClosed: false },
+  { id: 'm-4', riskId: 'risk-2', content: '接地装置连接完好', isClosed: true },
+  { id: 'm-5', riskId: 'risk-2', content: '通电区域人员已撤离', isClosed: true },
+  { id: 'm-6', riskId: 'risk-3', content: '消防设备就位', isClosed: false },
+  { id: 'm-7', riskId: 'risk-3', content: '防静电装置检查', isClosed: true },
+  { id: 'm-8', riskId: 'risk-3', content: '周边烟火源已清除', isClosed: false },
+  { id: 'm-9', riskId: 'risk-4', content: '顶升设备检查合格', isClosed: true },
+  { id: 'm-10', riskId: 'risk-4', content: '轮挡已放置', isClosed: false },
+  { id: 'm-11', riskId: 'risk-5', content: '牵引车状态检查', isClosed: true },
+  { id: 'm-12', riskId: 'risk-5', content: '拖机路线已确认', isClosed: true },
+  { id: 'm-13', riskId: 'risk-8', content: '断电程序已执行', isClosed: false },
+  { id: 'm-14', riskId: 'risk-8', content: '通电警告标识已悬挂', isClosed: false },
+];
+
+export const AIRCRAFT_TYPES = [
+  'B737-800',
+  'B737-MAX',
+  'B787-9',
+  'A320neo',
+  'A330-300',
+  'A350-900',
+  'C919',
+];
+
+export const SPECIAL_TOOLS = [
+  '顶升设备',
+  '扭矩扳手',
+  '孔探仪',
+  '液压车',
+  '氮气瓶',
+  '氧气瓶',
+  '梯架',
+  '工作平台',
+];
+
+export const WEATHER_CONDITIONS = [
+  '晴',
+  '多云',
+  '阴',
+  '小雨',
+  '雷阵雨',
+  '雾',
+  '大风',
+  '高温',
+];
