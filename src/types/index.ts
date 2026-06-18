@@ -2,6 +2,8 @@ export type RiskLevel = 'high' | 'medium' | 'low';
 export type LocationType = 'hangar' | 'apron' | 'line';
 export type RiskType = 'high_altitude' | 'power_test' | 'fuel_operation' | 'jacking' | 'towing';
 export type RiskStatus = 'open' | 'processing' | 'closed';
+export type EscalationLevel = 'none' | 'manager' | 'director';
+export type HandoverStatus = 'pending' | 'confirmed';
 
 export interface Base {
   id: string;
@@ -26,6 +28,11 @@ export interface RiskCardData {
   createdAt: string;
   isOverdue?: boolean;
   aircraftNo?: string;
+  escalationLevel?: EscalationLevel;
+  escalationAssignee?: string;
+  escalatedAt?: string;
+  sourceWorkCardNo?: string;
+  sourceFormId?: string;
 }
 
 export interface RiskMeasure {
@@ -62,6 +69,21 @@ export interface DailyRisk {
   description: string;
   level: RiskLevel;
   isChecked: boolean;
+  promotedRiskId?: string;
+}
+
+export interface HandoverRecord {
+  id: string;
+  handoverPerson: string;
+  receiverPerson: string;
+  handoverTime: string;
+  receivedRiskIds: string[];
+  unreceivedRiskIds: string[];
+  remarks: string;
+  status: HandoverStatus;
+  scopeBaseId: string;
+  scopeLocationType: LocationType | 'all';
+  scopeLocationId: string | null;
 }
 
 export interface RiskTypeMeta {

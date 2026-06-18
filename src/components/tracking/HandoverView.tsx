@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useRiskStore } from '@/store/useRiskStore';
 import { BASES, LOCATIONS, LOCATION_TYPE_META } from '@/data/mockData';
-import { getLocationTypeLabel } from '@/utils/helpers';
+import { getLocationTypeLabel, getRiskTypeLabel } from '@/utils/helpers';
 import type { LocationType } from '@/types';
 import { cn } from '@/lib/utils';
 import {
@@ -16,6 +16,8 @@ import {
   Filter,
   Download,
   RefreshCw,
+  ShieldAlert,
+  FileText,
 } from 'lucide-react';
 import Modal from '@/components/common/Modal';
 import Badge from '@/components/common/Badge';
@@ -34,14 +36,18 @@ interface HandoverViewProps {
 export default function HandoverView({ onExport }: HandoverViewProps) {
   const { getTeamSummary, selectedBaseId, selectedLocationType, setSelectedBaseId, setSelectedLocationType } = useRiskStore();
   const [selectedTeam, setSelectedTeam] = useState<string | null>(null);
+  const [selectedTeamLocType, setSelectedTeamLocType] = useState<LocationType | null>(null);
   const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
 
   const teamSummary = getTeamSummary();
 
-  const handleTeamClick = (teamName: string) => {
+  const handleTeamClick = (teamName: string, locType: LocationType) => {
     setSelectedTeam(teamName);
+    setSelectedTeamLocType(locType);
     setIsTeamModalOpen(true);
   };
+
+  const totalEscalated = teamSummary.reduce((s, t) => s + t.escalated, 0);
 
   return (
     <div className="space-y-5">
@@ -101,7 +107,7 @@ export default function HandoverView({ onExport }: HandoverViewProps) {
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
         <StatCard
           label="涉及班组"
           value={teamSummary.length}
@@ -132,13 +138,21 @@ export default function HandoverView({ onExport }: HandoverViewProps) {
           bgColor="bg-risk-highBg"
           highlight={teamSummary.reduce((s, t) => s + t.overdue, 0) > 0}
         />
+        <StatCard
+          label="已升级"
+          value={totalEscalated}
+          icon={ShieldAlert}
+          color="text-orange-400"
+          bgColor="bg-orange-500/15"
+          highlight={totalEscalated > 0}
+        />
       </div>
 
       <div className="bg-dashboard-surface border border-dashboard-border rounded-xl overflow-hidden">
         <div className="px-6 py-4 border-b border-dashboard-border flex items-center justify-between">
           <h3 className="text-base font-bold font-display text-white">班组交接汇总</h3>
           <span className="text-xs text-dashboard-muted">
-            点击班组查看未交接清楚的风险项
+            点击班组查看该区域未交接清楚的风险项
           </span>
         </div>
 
@@ -156,7 +170,7 @@ export default function HandoverView({ onExport }: HandoverViewProps) {
               return (
                 <button
                   key={`${team.team}-${team.locationType}`}
-                  onClick={() => handleTeamClick(team.team)}
+                  onClick={() => handleTeamClick(team.team, team.locationType)}
                   className="text-left bg-dashboard-card border border-dashboard-border rounded-xl p-4 hover:border-accent-blue/50 hover:shadow-lg transition-all group animate-fade-in-up"
                   style={{ animationDelay: `${idx * 0.05}s` }}
                 >
@@ -168,11 +182,19 @@ export default function HandoverView({ onExport }: HandoverViewProps) {
                         <span>{base?.name} · {getLocationTypeLabel(team.locationType)}</span>
                       </div>
                     </div>
-                    {team.overdue > 0 && (
-                      <span className="px-2 py-0.5 bg-risk-high text-white text-xs font-bold rounded-full animate-pulse">
-                        超时 {team.overdue}
-                      </span>
-                    )}
+                    <div className="flex flex-col items-end gap-1">
+                      {team.overdue > 0 && (
+                        <span className="px-2 py-0.5 bg-risk-high text-white text-xs font-bold rounded-full animate-pulse">
+                          超时 {team.overdue}
+                        </span>
+                      )}
+                      {team.escalated > 0 && (
+                        <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs font-bold rounded-full flex items-center gap-1">
+                          <ShieldAlert size={10} />
+                          升级 {team.escalated}
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-4 gap-2">
@@ -206,7 +228,7 @@ export default function HandoverView({ onExport }: HandoverViewProps) {
                   )}
 
                   <div className="mt-3 pt-3 border-t border-dashboard-border/50 flex items-center justify-between">
-                    <span className="text-xs text-dashboard-muted">查看详情</span>
+                    <span className="text-xs text-dashboard-muted">查看该区域详情</span>
                     <ChevronRight
                       size={16}
                       className="text-dashboard-muted group-hover:text-accent-blue group-hover:translate-x-0.5 transition-all"
@@ -223,6 +245,7 @@ export default function HandoverView({ onExport }: HandoverViewProps) {
         isOpen={isTeamModalOpen}
         onClose={() => setIsTeamModalOpen(false)}
         teamName={selectedTeam}
+        locationType={selectedTeamLocType}
       />
     </div>
   );
@@ -283,13 +306,15 @@ function TeamDetailModal({
   isOpen,
   onClose,
   teamName,
+  locationType,
 }: {
   isOpen: boolean;
   onClose: () => void;
   teamName: string | null;
+  locationType: LocationType | null;
 }) {
   const { getRisksByTeam, openRiskDetail } = useRiskStore();
-  const risks = teamName ? getRisksByTeam(teamName) : [];
+  const risks = teamName ? getRisksByTeam(teamName, locationType || undefined) : [];
 
   const handleViewDetail = (riskId: string) => {
     onClose();
@@ -300,11 +325,16 @@ function TeamDetailModal({
 
   const unclosedRisks = risks.filter((r) => r.status !== 'closed');
   const overdueRisks = risks.filter((r) => r.isOverdue && r.status !== 'closed');
+  const escalatedRisks = risks.filter(
+    (r) => r.escalationLevel && r.escalationLevel !== 'none' && r.status !== 'closed'
+  );
+
+  const locTypeLabel = locationType ? getLocationTypeLabel(locationType) : '';
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={`${teamName || ''} - 未交接风险`} size="lg">
+    <Modal isOpen={isOpen} onClose={onClose} title={`${teamName || ''} - ${locTypeLabel}未交接风险`} size="lg">
       <div className="space-y-4">
-        <div className="flex items-center gap-6 p-4 bg-dashboard-card rounded-lg border border-dashboard-border">
+        <div className="flex items-center gap-4 p-4 bg-dashboard-card rounded-lg border border-dashboard-border flex-wrap">
           <div className="text-center">
             <div className="text-2xl font-bold text-white font-mono">{unclosedRisks.length}</div>
             <div className="text-xs text-dashboard-muted">未闭环</div>
@@ -313,6 +343,11 @@ function TeamDetailModal({
           <div className="text-center">
             <div className="text-2xl font-bold text-risk-high font-mono">{overdueRisks.length}</div>
             <div className="text-xs text-dashboard-muted">已超时</div>
+          </div>
+          <div className="w-px h-10 bg-dashboard-border" />
+          <div className="text-center">
+            <div className="text-2xl font-bold text-orange-400 font-mono">{escalatedRisks.length}</div>
+            <div className="text-xs text-dashboard-muted">已升级</div>
           </div>
           <div className="w-px h-10 bg-dashboard-border" />
           <div className="text-center">
@@ -326,7 +361,7 @@ function TeamDetailModal({
         <div>
           <h4 className="text-sm font-semibold text-white mb-3 flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-risk-high" />
-            待交接风险项（按优先级）
+            待交接风险项（按优先级，仅当前{locTypeLabel}范围）
           </h4>
           <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
             {unclosedRisks.length === 0 ? (
@@ -337,6 +372,7 @@ function TeamDetailModal({
             ) : (
               unclosedRisks.map((risk, idx) => {
                 const location = LOCATIONS.find((l) => l.id === risk.locationId);
+                const isEscalated = risk.escalationLevel && risk.escalationLevel !== 'none';
                 return (
                   <div
                     key={risk.id}
@@ -359,22 +395,26 @@ function TeamDetailModal({
                       )}
                     />
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-medium text-white text-sm">
-                          {risk.type === 'high_altitude'
-                            ? '高空作业'
-                            : risk.type === 'power_test'
-                            ? '通电测试'
-                            : risk.type === 'fuel_operation'
-                            ? '燃油作业'
-                            : risk.type === 'jacking'
-                            ? '顶升作业'
-                            : '拖机作业'}
+                          {getRiskTypeLabel(risk.type)}
                         </span>
                         <Badge variant="risk" level={risk.level} />
                         {risk.isOverdue && (
                           <span className="px-2 py-0.5 bg-risk-high text-white text-xs font-medium rounded animate-pulse">
                             超时
+                          </span>
+                        )}
+                        {isEscalated && (
+                          <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs font-medium rounded flex items-center gap-1">
+                            <ShieldAlert size={10} />
+                            {risk.escalationLevel === 'manager' ? '值班经理' : '质量安全主管'}
+                          </span>
+                        )}
+                        {risk.sourceWorkCardNo && (
+                          <span className="flex items-center gap-1 text-xs text-accent-blue font-mono">
+                            <FileText size={10} />
+                            {risk.sourceWorkCardNo}
                           </span>
                         )}
                       </div>

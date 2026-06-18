@@ -2,7 +2,6 @@ import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
 import { useRiskStore } from '@/store/useRiskStore';
 import {
-  getRiskLevelColor,
   getRiskLevelLabel,
 } from '@/utils/helpers';
 import { cn } from '@/lib/utils';
@@ -13,14 +12,17 @@ import {
   AlertTriangle,
   Check,
   ShieldCheck,
+  ArrowRight,
+  FileText,
 } from 'lucide-react';
 
 interface DailyRiskListProps {
   formId: string | null;
+  onPromote?: (riskId: string, promotedRiskId: string) => void;
 }
 
-export default function DailyRiskList({ formId }: DailyRiskListProps) {
-  const { dailyRisks, toggleDailyRisk, preShiftForms } = useRiskStore();
+export default function DailyRiskList({ formId, onPromote }: DailyRiskListProps) {
+  const { dailyRisks, toggleDailyRisk, preShiftForms, promoteDailyRiskToTracking } = useRiskStore();
 
   const filteredRisks = formId
     ? dailyRisks.filter((r) => r.formId === formId)
@@ -29,6 +31,11 @@ export default function DailyRiskList({ formId }: DailyRiskListProps) {
   const relatedForm = formId ? preShiftForms.find((f) => f.id === formId) : null;
 
   const allChecked = filteredRisks.length > 0 && filteredRisks.every((r) => r.isChecked);
+
+  const handlePromote = (riskId: string) => {
+    const promotedId = promoteDailyRiskToTracking(riskId);
+    if (promotedId && onPromote) onPromote(riskId, promotedId);
+  };
 
   if (filteredRisks.length === 0) {
     return (
@@ -107,7 +114,13 @@ export default function DailyRiskList({ formId }: DailyRiskListProps) {
 
       <div className="divide-y divide-dashboard-border/50">
         {filteredRisks.map((risk, index) => (
-          <RiskItem key={risk.id} risk={risk} index={index} onToggle={() => toggleDailyRisk(risk.id)} />
+          <RiskItem
+            key={risk.id}
+            risk={risk}
+            index={index}
+            onToggle={() => toggleDailyRisk(risk.id)}
+            onPromote={handlePromote}
+          />
         ))}
       </div>
 
@@ -128,19 +141,19 @@ function RiskItem({
   risk,
   index,
   onToggle,
+  onPromote,
 }: {
   risk: DailyRisk;
   index: number;
   onToggle: () => void;
+  onPromote: (riskId: string) => void;
 }) {
-  const colors = getRiskLevelColor(risk.level);
   const staggerClass = `animate-stagger-${Math.min((index % 10) + 1, 10)}`;
 
   return (
     <div
-      onClick={onToggle}
       className={cn(
-        'flex items-center gap-4 p-4 cursor-pointer transition-all animate-fade-in-up',
+        'flex items-center gap-4 p-4 transition-all animate-fade-in-up',
         staggerClass,
         risk.isChecked
           ? 'bg-risk-lowBg/10 hover:bg-risk-lowBg/20'
@@ -148,6 +161,7 @@ function RiskItem({
       )}
     >
       <button
+        onClick={onToggle}
         className={cn(
           'w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all',
           risk.isChecked
@@ -169,7 +183,7 @@ function RiskItem({
         )}
       />
 
-      <div className="flex-1 min-w-0">
+      <div className="flex-1 min-w-0" onClick={onToggle}>
         <p
           className={cn(
             'text-sm font-medium',
@@ -191,6 +205,22 @@ function RiskItem({
         </span>
       ) : (
         <Circle className="w-4 h-4 text-dashboard-muted" />
+      )}
+
+      {risk.promotedRiskId ? (
+        <span className="flex items-center gap-1 text-xs text-accent-blue font-medium px-2.5 py-1.5 bg-accent-blue/10 rounded-lg">
+          <FileText size={12} />
+          已转入跟踪
+        </span>
+      ) : (
+        <Button
+          variant="secondary"
+          size="sm"
+          onClick={() => onPromote(risk.id)}
+        >
+          <ArrowRight size={12} />
+          <span>转入跟踪</span>
+        </Button>
       )}
     </div>
   );

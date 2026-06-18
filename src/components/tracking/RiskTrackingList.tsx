@@ -23,6 +23,7 @@ import {
   CheckCircle2,
   ChevronDown,
   Search,
+  ShieldAlert,
 } from 'lucide-react';
 
 interface RiskTrackingListProps {
@@ -168,6 +169,9 @@ export default function RiskTrackingList({ onSelectRisk }: RiskTrackingListProps
                   责任班组
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-dashboard-muted uppercase tracking-wider">
+                  来源工卡
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-dashboard-muted uppercase tracking-wider">
                   放行时限
                 </th>
                 <th className="px-6 py-3 text-left text-xs font-semibold text-dashboard-muted uppercase tracking-wider">
@@ -181,7 +185,7 @@ export default function RiskTrackingList({ onSelectRisk }: RiskTrackingListProps
             <tbody className="divide-y divide-dashboard-border/50">
               {filteredRisks.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-dashboard-muted">
+                  <td colSpan={8} className="px-6 py-12 text-center text-dashboard-muted">
                     暂无符合条件的风险项
                   </td>
                 </tr>
@@ -189,6 +193,7 @@ export default function RiskTrackingList({ onSelectRisk }: RiskTrackingListProps
                 filteredRisks.map((risk) => {
                   const location = LOCATIONS.find((l) => l.id === risk.locationId);
                   const colors = getRiskLevelColor(risk.level);
+                  const isEscalated = risk.escalationLevel && risk.escalationLevel !== 'none';
                   return (
                     <tr
                       key={risk.id}
@@ -220,6 +225,12 @@ export default function RiskTrackingList({ onSelectRisk }: RiskTrackingListProps
                               超时
                             </span>
                           )}
+                          {isEscalated && (
+                            <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs font-medium rounded-full flex items-center gap-1">
+                              <ShieldAlert size={10} />
+                              {risk.escalationLevel === 'manager' ? '值班经理' : '质量安全主管'}
+                            </span>
+                          )}
                         </div>
                       </td>
                       <td className="px-6 py-4">
@@ -238,6 +249,16 @@ export default function RiskTrackingList({ onSelectRisk }: RiskTrackingListProps
                           <Users className="w-4 h-4 text-dashboard-muted" />
                           {risk.team}
                         </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        {risk.sourceWorkCardNo ? (
+                          <span className="flex items-center gap-1.5 text-sm text-accent-blue font-mono">
+                            <FileText className="w-3.5 h-3.5" />
+                            {risk.sourceWorkCardNo}
+                          </span>
+                        ) : (
+                          <span className="text-sm text-dashboard-muted">-</span>
+                        )}
                       </td>
                       <td className="px-6 py-4">
                         <span

@@ -3,8 +3,20 @@ import Header from '@/components/layout/Header';
 import RiskTrackingList from '@/components/tracking/RiskTrackingList';
 import TrackingForm from '@/components/tracking/TrackingForm';
 import HandoverView from '@/components/tracking/HandoverView';
+import HandoverConfirmModal from '@/components/tracking/HandoverConfirmModal';
 import { useRiskStore } from '@/store/useRiskStore';
-import { ClipboardList, Users, Download, X, Copy, Check } from 'lucide-react';
+import {
+  ClipboardList,
+  Users,
+  Download,
+  Copy,
+  Check,
+  ClipboardCheck,
+  History,
+  User,
+  Clock,
+  AlertTriangle,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Button from '@/components/common/Button';
 import Modal from '@/components/common/Modal';
@@ -16,8 +28,10 @@ export default function Tracking() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [selectedRiskId, setSelectedRiskId] = useState<string | null>(null);
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
+  const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
+  const [isHistoryOpen, setIsHistoryOpen] = useState(false);
   const [copied, setCopied] = useState(false);
-  const { generateHandoverText } = useRiskStore();
+  const { generateHandoverText, getHandoverRecords } = useRiskStore();
 
   const handleSelectRisk = (riskId: string) => {
     setSelectedRiskId(riskId);
@@ -46,6 +60,7 @@ export default function Tracking() {
   };
 
   const handoverText = generateHandoverText();
+  const handoverRecords = getHandoverRecords(true);
 
   return (
     <div className="min-h-screen bg-dashboard-bg">
@@ -59,7 +74,17 @@ export default function Tracking() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            {handoverRecords.length > 0 && (
+              <Button variant="secondary" size="sm" onClick={() => setIsHistoryOpen(true)}>
+                <History size={16} />
+                <span>交接记录 ({handoverRecords.length})</span>
+              </Button>
+            )}
+            <Button variant="secondary" size="sm" onClick={() => setIsConfirmModalOpen(true)}>
+              <ClipboardCheck size={16} />
+              <span>接班确认</span>
+            </Button>
             <div className="flex items-center gap-1 p-1 bg-dashboard-surface rounded-lg border border-dashboard-border">
               <button
                 onClick={() => setViewMode('list')}
@@ -107,6 +132,11 @@ export default function Tracking() {
         riskId={selectedRiskId}
       />
 
+      <HandoverConfirmModal
+        isOpen={isConfirmModalOpen}
+        onClose={() => setIsConfirmModalOpen(false)}
+      />
+
       <Modal
         isOpen={isExportModalOpen}
         onClose={() => setIsExportModalOpen(false)}
@@ -137,15 +167,102 @@ export default function Tracking() {
               {handoverText}
             </pre>
           </div>
-          <div className="flex items-center justify-end gap-3 pt-2">
-            <Button variant="secondary" onClick={() => setIsExportModalOpen(false)}>
-              关闭
+          <div className="flex items-center justify-between gap-3 pt-2">
+            <Button variant="secondary" onClick={() => setIsConfirmModalOpen(true)}>
+              <ClipboardCheck size={16} />
+              <span>接班确认</span>
             </Button>
-            <Button onClick={handleCopy}>
-              {copied ? <Check size={16} /> : <Copy size={16} />}
-              <span>{copied ? '已复制到剪贴板' : '复制到剪贴板'}</span>
-            </Button>
+            <div className="flex items-center gap-3">
+              <Button variant="secondary" onClick={() => setIsExportModalOpen(false)}>
+                关闭
+              </Button>
+              <Button onClick={handleCopy}>
+                {copied ? <Check size={16} /> : <Copy size={16} />}
+                <span>{copied ? '已复制到剪贴板' : '复制到剪贴板'}</span>
+              </Button>
+            </div>
           </div>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isHistoryOpen}
+        onClose={() => setIsHistoryOpen(false)}
+        title="交接确认记录"
+        size="lg"
+      >
+        <div className="space-y-3 max-h-[70vh] overflow-y-auto pr-1">
+          {handoverRecords.length === 0 ? (
+            <div className="py-12 text-center text-dashboard-muted text-sm">
+              暂无交接记录，完成接班确认后将在此显示
+            </div>
+          ) : (
+            handoverRecords
+              .slice()
+              .reverse()
+              .map((rec) => (
+                <div
+                  key={rec.id}
+                  className="bg-dashboard-card rounded-lg p-4 border border-dashboard-border"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <ClipboardCheck className="w-4 h-4 text-risk-low" />
+                      <span className="text-sm font-semibold text-white">交接确认</span>
+                      <span className="px-2 py-0.5 bg-risk-lowBg text-risk-low text-xs rounded-full">
+                        已确认
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 text-xs text-dashboard-muted">
+                      <Clock size={12} />
+                      <span className="font-mono">{rec.handoverTime}</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3 text-sm mb-3">
+                    <div className="flex items-center gap-2">
+                      <User size={14} className="text-dashboard-muted" />
+                      <div>
+                        <div className="text-xs text-dashboard-muted">交班人</div>
+                        <div className="text-white font-medium">{rec.handoverPerson}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <User size={14} className="text-dashboard-muted" />
+                      <div>
+                        <div className="text-xs text-dashboard-muted">接班人</div>
+                        <div className="text-white font-medium">{rec.receiverPerson}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div>
+                        <div className="text-xs text-dashboard-muted">已接收</div>
+                        <div className="text-risk-low font-mono font-bold">{rec.receivedRiskIds.length}</div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-dashboard-muted">未接收</div>
+                        <div className={cn('font-mono font-bold', rec.unreceivedRiskIds.length > 0 ? 'text-risk-high' : 'text-risk-low')}>
+                          {rec.unreceivedRiskIds.length}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  {rec.unreceivedRiskIds.length > 0 && (
+                    <div className="flex items-start gap-2 p-2.5 bg-risk-highBg/15 rounded-lg text-xs text-risk-high">
+                      <AlertTriangle size={14} className="flex-shrink-0 mt-0.5" />
+                      <span>
+                        {rec.unreceivedRiskIds.length} 项风险未接收，需接班人重点跟进闭环
+                      </span>
+                    </div>
+                  )}
+                  {rec.remarks && (
+                    <div className="mt-2 pt-2 border-t border-dashboard-border">
+                      <div className="text-xs text-dashboard-muted mb-0.5">接班备注</div>
+                      <p className="text-sm text-dashboard-text">{rec.remarks}</p>
+                    </div>
+                  )}
+                </div>
+              ))
+          )}
         </div>
       </Modal>
     </div>

@@ -24,6 +24,7 @@ import {
   ArrowRight,
   History,
   User,
+  ShieldAlert,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -87,6 +88,12 @@ export default function RiskDetailModal() {
                       已超时
                     </span>
                   )}
+                  {risk.escalationLevel && risk.escalationLevel !== 'none' && (
+                    <span className="px-2.5 py-0.5 bg-orange-500/20 text-orange-400 text-xs font-medium rounded-full flex items-center gap-1">
+                      <ShieldAlert size={12} />
+                      {risk.escalationLevel === 'manager' ? '值班经理跟进' : '质量安全主管督办'}
+                    </span>
+                  )}
                 </div>
               </div>
             </div>
@@ -117,6 +124,21 @@ export default function RiskDetailModal() {
               highlight={risk.isOverdue}
             />
             <InfoCard icon={Calendar} label="创建时间" value={risk.createdAt} />
+            {risk.sourceWorkCardNo && (
+              <InfoCard
+                icon={FileText}
+                label="来源工卡"
+                value={risk.sourceWorkCardNo}
+                mono
+              />
+            )}
+            {risk.escalationAssignee && (
+              <InfoCard
+                icon={ShieldAlert}
+                label="升级跟进人"
+                value={risk.escalationAssignee}
+              />
+            )}
           </div>
 
           <div>
@@ -258,11 +280,13 @@ function InfoCard({
   label,
   value,
   highlight,
+  mono,
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   highlight?: boolean;
+  mono?: boolean;
 }) {
   return (
     <div
@@ -278,7 +302,7 @@ function InfoCard({
       <div
         className={cn(
           'text-base font-semibold',
-          highlight ? 'text-risk-high font-mono' : 'text-white'
+          highlight ? 'text-risk-high font-mono' : mono ? 'text-accent-blue font-mono' : 'text-white'
         )}
       >
         {value}

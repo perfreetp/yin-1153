@@ -2,10 +2,10 @@ import { useState, useEffect } from 'react';
 import Modal from '@/components/common/Modal';
 import Button from '@/components/common/Button';
 import Badge from '@/components/common/Badge';
-import { useRiskStore } from '@/store/useRiskStore';
+import { useRiskStore, isReviewQualified } from '@/store/useRiskStore';
 import { LOCATIONS } from '@/data/mockData';
-import { generateId, getRiskLevelLabel, getRiskTypeLabel, getStatusLabel } from '@/utils/helpers';
-import type { TrackingRecord, RiskStatus } from '@/types';
+import { getRiskLevelLabel, getRiskTypeLabel, getStatusLabel } from '@/utils/helpers';
+import type { EscalationLevel } from '@/types';
 import {
   Camera,
   FileText,
@@ -19,6 +19,9 @@ import {
   ArrowRight,
   PlayCircle,
   CheckSquare,
+  ShieldAlert,
+  TrendingUp,
+  Info,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -28,8 +31,25 @@ interface TrackingFormProps {
   riskId: string | null;
 }
 
+const REVIEW_OPTIONS = [
+  { value: '整改合格', closeable: true },
+  { value: '基本合格需跟进', closeable: true },
+  { value: '不合格需重新整改', closeable: false },
+  { value: '待进一步验证', closeable: false },
+];
+
+const ESCALATION_TARGETS: Array<{ level: EscalationLevel; label: string; desc: string }> = [
+  { level: 'manager', label: '升级至值班经理', desc: '超时2小时以上，需值班经理介入协调' },
+  { level: 'director', label: '升级至质量安全主管', desc: '超时4小时以上，需质量安全主管督办' },
+];
+
 export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormProps) {
-  const { riskCards, addTrackingRecord, updateRiskStatus, getRecordsByRiskId } = useRiskStore();
+  const {
+    riskCards,
+    submitTracking,
+    escalateRisk,
+    getRecordsByRiskId,
+  } = useRiskStore();
 
   const [formData, setFormData] = useState({
     photoUrl: '',
@@ -37,8 +57,10 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
     reviewResult: '',
     handler: '安全员-李工',
   });
-  const [submitAction, setSubmitAction] = useState<'processing' | 'closed'>('processing');
   const [previewPhotos, setPreviewPhotos] = useState<string[]>([]);
+  const [showEscalation, setShowEscalation] = useState(false);
+  const [escAssignee, setEscAssignee] = useState('');
+  const [escLevel, setEscLevel] = useState<EscalationLevel>('manager');
 
   const risk = riskCards.find((r) => r.id === riskId);
   const existingRecords = riskId ? getRecordsByRiskId(riskId) : [];
@@ -53,7 +75,9 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
         handler: '安全员-李工',
       });
       setPreviewPhotos([]);
-      setSubmitAction('processing');
+      setShowEscalation(false);
+      setEscAssignee('');
+      setEscLevel('manager');
     }
   }, [isOpen, riskId]);
 
@@ -68,32 +92,31 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
     setPreviewPhotos(previewPhotos.filter((_, i) => i !== index));
   };
 
+  const canClose = isReviewQualified(formData.reviewResult);
+
   const handleSubmit = () => {
     if (!riskId || !formData.rectification.trim() || !formData.reviewResult.trim()) return;
 
-    const now = new Date().toLocaleString('zh-CN');
-    const record: TrackingRecord = {
-      id: generateId(),
-      riskId,
+    submitTracking(riskId, {
       rectification: formData.rectification,
       reviewResult: formData.reviewResult,
       handler: formData.handler,
       photoUrl: previewPhotos[0],
-      handledAt: now,
-    };
-
-    addTrackingRecord(record);
-
-    if (submitAction === 'closed') {
-      updateRiskStatus(riskId, 'closed');
-    } else {
-      updateRiskStatus(riskId, 'processing');
-    }
+    });
 
     onClose();
   };
 
+  const handleEscalate = () => {
+    if (!riskId || !escAssignee.trim()) return;
+    escalateRisk(riskId, escLevel, escAssignee.trim(), formData.handler);
+    setShowEscalation(false);
+    setEscAssignee('');
+  };
+
   if (!risk) return null;
+
+  const isEscalated = risk.escalationLevel && risk.escalationLevel !== 'none';
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="风险闭环处理" size="xl">
@@ -110,18 +133,32 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
                   <Badge variant="risk" level={risk.level}>
                     {getRiskLevelLabel(risk.level)}
                   </Badge>
+                  {isEscalated && (
+                    <span className="px-2 py-0.5 bg-orange-500/20 text-orange-400 text-xs font-medium rounded-full flex items-center gap-1">
+                      <ShieldAlert size={12} />
+                      {risk.escalationLevel === 'manager' ? '值班经理跟进' : '质量安全主管督办'}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-4 mt-2 text-sm text-dashboard-muted">
                   <span>位置：{location?.name || '-'}</span>
                   <span>班组：{risk.team}</span>
                 </div>
-                <div className="flex items-center gap-2 mt-1 text-sm">
+                <div className="flex items-center gap-2 mt-1 text-sm flex-wrap">
                   <Clock className="w-3.5 h-3.5 text-dashboard-muted" />
                   <span className={cn(risk.isOverdue ? 'text-risk-high font-medium' : 'text-dashboard-muted')}>
                     放行时限：{risk.releaseDeadline}
                     {risk.isOverdue && '（已超时）'}
                   </span>
                 </div>
+                {risk.sourceWorkCardNo && (
+                  <div className="flex items-center gap-2 mt-1 text-sm">
+                    <FileText className="w-3.5 h-3.5 text-accent-blue" />
+                    <span className="text-dashboard-text">
+                      来源工卡：<span className="font-mono text-accent-blue">{risk.sourceWorkCardNo}</span>
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -191,31 +228,25 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
               <label className="flex items-center gap-2 text-sm font-medium text-dashboard-text mb-2">
                 <CheckCircle2 className="w-4 h-4 text-accent-blue" />
                 复核结论 <span className="text-risk-high">*</span>
+                <span className="text-xs text-dashboard-muted font-normal">
+                  （仅"整改合格/基本合格"可确认闭环）
+                </span>
               </label>
-              <div className="space-y-2">
-                <div className="flex gap-2 flex-wrap">
-                  {['整改合格', '基本合格需跟进', '不合格需重新整改', '待进一步验证'].map((opt) => (
-                    <button
-                      key={opt}
-                      onClick={() => setFormData({ ...formData, reviewResult: opt })}
-                      className={cn(
-                        'px-3 py-1.5 text-sm rounded-lg border transition-all',
-                        formData.reviewResult === opt
-                          ? 'bg-accent-blue/20 border-accent-blue text-white'
-                          : 'bg-dashboard-card border-dashboard-border text-dashboard-text hover:border-accent-blue/50'
-                      )}
-                    >
-                      {opt}
-                    </button>
-                  ))}
-                </div>
-                <textarea
-                  rows={2}
-                  placeholder="补充说明（选填）"
-                  value={formData.reviewResult.includes('整改') ? formData.reviewResult : formData.reviewResult}
-                  onChange={(e) => setFormData({ ...formData, reviewResult: e.target.value })}
-                  className="input-field resize-none text-sm"
-                />
+              <div className="flex gap-2 flex-wrap">
+                {REVIEW_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => setFormData({ ...formData, reviewResult: opt.value })}
+                    className={cn(
+                      'px-3 py-1.5 text-sm rounded-lg border transition-all',
+                      formData.reviewResult === opt.value
+                        ? 'bg-accent-blue/20 border-accent-blue text-white'
+                        : 'bg-dashboard-card border-dashboard-border text-dashboard-text hover:border-accent-blue/50'
+                    )}
+                  >
+                    {opt.value}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -240,7 +271,7 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
               <Clock className="w-4 h-4 text-accent-blue" />
               处理时间线
             </h4>
-            <div className="relative pl-5 space-y-0">
+            <div className="relative pl-5 space-y-0 max-h-72 overflow-y-auto pr-1">
               <div className="absolute left-1.5 top-2 bottom-2 w-0.5 bg-dashboard-border" />
               <TimelineItem
                 icon={AlertTriangle}
@@ -251,67 +282,128 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
                 content={`初始状态：${getStatusLabel(risk.status)}`}
                 isFirst
               />
-              {existingRecords.slice().reverse().map((record, idx) => (
-                <TimelineItem
-                  key={record.id}
-                  icon={CheckCircle2}
-                  iconColor="text-risk-medium"
-                  iconBg="bg-risk-mediumBg"
-                  title={record.handler}
-                  time={record.handledAt}
-                  content={record.reviewResult}
-                />
-              ))}
-              <div className="relative -ml-1.5 pb-2">
-                <div className="w-3 h-3 rounded-full bg-accent-blue animate-pulse absolute -left-[1px] top-1.5" />
-                <div className="ml-6 text-sm text-accent-blue font-medium">
-                  当前处理中...
+              {existingRecords.slice().reverse().map((record) => {
+                const isEscRec = record.rectification?.includes('责任升级');
+                return (
+                  <TimelineItem
+                    key={record.id}
+                    icon={isEscRec ? ShieldAlert : CheckCircle2}
+                    iconColor={isEscRec ? 'text-orange-400' : 'text-risk-medium'}
+                    iconBg={isEscRec ? 'bg-orange-500/20' : 'bg-risk-mediumBg'}
+                    title={record.handler}
+                    time={record.handledAt}
+                    content={`${record.reviewResult}${record.rectification ? ' · ' + record.rectification : ''}`}
+                  />
+                );
+              })}
+              {risk.status !== 'closed' && (
+                <div className="relative -ml-1.5 pb-2">
+                  <div className="w-3 h-3 rounded-full bg-accent-blue animate-pulse absolute -left-[1px] top-1.5" />
+                  <div className="ml-6 text-sm text-accent-blue font-medium">
+                    {risk.status === 'processing' ? '处理进行中...' : '待处理'}
+                  </div>
                 </div>
-              </div>
+              )}
+              {risk.status === 'closed' && (
+                <div className="relative -ml-1.5 pb-2">
+                  <div className="w-3 h-3 rounded-full bg-risk-low absolute -left-[1px] top-1.5" />
+                  <div className="ml-6 text-sm text-risk-low font-medium">已闭环</div>
+                </div>
+              )}
             </div>
           </div>
 
           <div className="bg-dashboard-card rounded-lg p-4 border border-dashboard-border">
-            <h4 className="text-sm font-semibold text-white mb-3">提交操作</h4>
+            <div className="flex items-center justify-between mb-3">
+              <h4 className="text-sm font-semibold text-white">提交操作</h4>
+              <button
+                onClick={() => setShowEscalation(!showEscalation)}
+                className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+              >
+                <TrendingUp size={14} />
+                责任升级
+              </button>
+            </div>
+
+            {showEscalation && (
+              <div className="mb-3 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg space-y-3 animate-fade-in-up">
+                <div className="flex items-center gap-2 text-xs text-orange-400">
+                  <Info size={14} />
+                  <span>超时风险可升级责任，指定跟进人并写入时间线</span>
+                </div>
+                <div className="space-y-2">
+                  {ESCALATION_TARGETS.map((t) => (
+                    <button
+                      key={t.level}
+                      onClick={() => setEscLevel(t.level)}
+                      className={cn(
+                        'w-full text-left p-2.5 rounded-lg border text-sm transition-all',
+                        escLevel === t.level
+                          ? 'bg-orange-500/20 border-orange-500/50 text-white'
+                          : 'bg-dashboard-bg border-dashboard-border text-dashboard-text hover:border-orange-500/40'
+                      )}
+                    >
+                      <div className="font-medium">{t.label}</div>
+                      <div className="text-xs text-dashboard-muted mt-0.5">{t.desc}</div>
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="指定跟进人姓名"
+                    value={escAssignee}
+                    onChange={(e) => setEscAssignee(e.target.value)}
+                    className="input-field flex-1 text-sm py-1.5"
+                  />
+                  <Button variant="secondary" size="sm" onClick={handleEscalate} disabled={!escAssignee.trim()}>
+                    <ShieldAlert size={14} />
+                    <span>确认升级</span>
+                  </Button>
+                </div>
+              </div>
+            )}
+
             <div className="space-y-2">
               <button
-                onClick={() => setSubmitAction('processing')}
+                onClick={handleSubmit}
+                disabled={!formData.rectification.trim() || !formData.reviewResult.trim()}
                 className={cn(
                   'w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all',
-                  submitAction === 'processing'
-                    ? 'bg-risk-mediumBg border-risk-medium/50'
-                    : 'bg-dashboard-bg border-dashboard-border hover:border-dashboard-text/50'
+                  'bg-risk-lowBg/30 border-risk-low/50 hover:bg-risk-lowBg/50',
+                  (!formData.rectification.trim() || !formData.reviewResult.trim()) && 'opacity-50 cursor-not-allowed'
                 )}
               >
-                <PlayCircle className={cn('w-6 h-6', submitAction === 'processing' ? 'text-risk-medium' : 'text-dashboard-muted')} />
-                <div>
-                  <div className={cn('font-medium', submitAction === 'processing' ? 'text-white' : 'text-dashboard-text')}>
-                    保存为处理中
-                  </div>
+                <PlayCircle className="w-6 h-6 text-risk-medium" />
+                <div className="flex-1">
+                  <div className="font-medium text-white">保存处理记录</div>
                   <div className="text-xs text-dashboard-muted">
-                    整改措施已落实，需继续跟踪验证
+                    {canClose
+                      ? '复核合格，将自动确认闭环并移出超时列表'
+                      : '当前复核结论将保持"处理中"状态，继续跟踪'}
                   </div>
                 </div>
-              </button>
-              <button
-                onClick={() => setSubmitAction('closed')}
-                className={cn(
-                  'w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-all',
-                  submitAction === 'closed'
-                    ? 'bg-risk-lowBg border-risk-low/50'
-                    : 'bg-dashboard-bg border-dashboard-border hover:border-dashboard-text/50'
+                {!canClose && formData.reviewResult && (
+                  <span className="text-xs text-orange-400 flex items-center gap-1">
+                    <Info size={12} />
+                    不可闭环
+                  </span>
                 )}
-              >
-                <CheckSquare className={cn('w-6 h-6', submitAction === 'closed' ? 'text-risk-low' : 'text-dashboard-muted')} />
-                <div>
-                  <div className={cn('font-medium', submitAction === 'closed' ? 'text-white' : 'text-dashboard-text')}>
-                    确认闭环
-                  </div>
-                  <div className="text-xs text-dashboard-muted">
-                    风险已完全解除，从超时列表移除
-                  </div>
-                </div>
               </button>
+              {formData.reviewResult && !canClose && (
+                <div className="flex items-start gap-2 p-2.5 bg-orange-500/10 rounded-lg text-xs text-orange-400">
+                  <Info size={14} className="flex-shrink-0 mt-0.5" />
+                  <span>
+                    复核结论为「{formData.reviewResult}」，不满足闭环条件。风险将保留在处理中并继续跟踪，超时统计仍会计入。
+                  </span>
+                </div>
+              )}
+              {canClose && (
+                <div className="flex items-center gap-2 p-2.5 bg-risk-lowBg/20 rounded-lg text-xs text-risk-low">
+                  <CheckSquare size={14} />
+                  <span>复核结论为「{formData.reviewResult}」，提交后风险将确认闭环，所有超时统计与标签不再计入。</span>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -324,12 +416,9 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
         <Button
           onClick={handleSubmit}
           disabled={!formData.rectification.trim() || !formData.reviewResult.trim()}
-          variant={submitAction === 'closed' ? 'primary' : 'primary'}
         >
           <ArrowRight size={16} />
-          <span>
-            {submitAction === 'processing' ? '提交处理记录' : '确认闭环'}
-          </span>
+          <span>{canClose ? '确认闭环' : '提交处理记录'}</span>
         </Button>
       </div>
     </Modal>
@@ -364,7 +453,7 @@ function TimelineItem({
         <Icon className={cn('w-2.5 h-2.5', iconColor)} />
       </div>
       <div className="ml-5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-sm font-medium text-white">{title}</span>
           <span className="text-xs text-dashboard-muted font-mono">{time}</span>
         </div>

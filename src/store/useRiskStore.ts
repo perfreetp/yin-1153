@@ -6,8 +6,10 @@ import type {
   PreShiftFormData,
   DailyRisk,
   TrackingRecord,
+  HandoverRecord,
   LocationType,
   RiskStatus,
+  EscalationLevel,
 } from '@/types';
 import {
   INITIAL_RISK_CARDS,
@@ -15,6 +17,29 @@ import {
   LOCATIONS,
   BASES,
 } from '@/data/mockData';
+
+const QUALIFIED_RESULTS = ['整改合格', '基本合格需跟进'];
+const ESCALATION_THRESHOLD_HOURS = 2;
+
+export function isReviewQualified(reviewResult: string): boolean {
+  return QUALIFIED_RESULTS.some((q) => reviewResult.includes(q));
+}
+
+export function getEscalationLevel(
+  isOverdue: boolean | undefined,
+  releaseDeadline: string,
+  status: RiskStatus,
+  currentLevel: EscalationLevel = 'none'
+): EscalationLevel {
+  if (status === 'closed') return 'none';
+  if (!isOverdue) return currentLevel === 'none' ? 'none' : currentLevel;
+  const deadline = new Date(releaseDeadline.replace(/-/g, '/')).getTime();
+  if (Number.isNaN(deadline)) return currentLevel === 'none' ? 'manager' : currentLevel;
+  const diffHours = (Date.now() - deadline) / (1000 * 60 * 60);
+  if (diffHours >= ESCALATION_THRESHOLD_HOURS * 2) return 'director';
+  if (diffHours >= ESCALATION_THRESHOLD_HOURS) return 'manager';
+  return currentLevel === 'none' ? 'none' : currentLevel;
+}
 
 interface RiskState {
   selectedBaseId: string;
@@ -27,6 +52,7 @@ interface RiskState {
   preShiftForms: PreShiftFormData[];
   dailyRisks: DailyRisk[];
   trackingRecords: TrackingRecord[];
+  handoverRecords: HandoverRecord[];
 
   setSelectedBaseId: (id: string) => void;
   setSelectedLocationType: (type: LocationType | 'all') => void;
@@ -39,13 +65,29 @@ interface RiskState {
   addPreShiftForm: (form: PreShiftFormData) => void;
   addDailyRisks: (risks: DailyRisk[]) => void;
   toggleDailyRisk: (riskId: string) => void;
+  promoteDailyRiskToTracking: (riskId: string) => string | null;
 
   addTrackingRecord: (record: TrackingRecord) => void;
   updateRiskStatus: (riskId: string, status: RiskStatus) => void;
   closeRisk: (riskId: string, handler: string, reviewResult: string) => void;
+  submitTracking: (
+    riskId: string,
+    payload: { rectification: string; reviewResult: string; handler: string; photoUrl?: string }
+  ) => RiskStatus;
+
+  escalateRisk: (riskId: string, level: EscalationLevel, assignee: string, operator: string) => void;
+
+  confirmHandover: (payload: {
+    handoverPerson: string;
+    receiverPerson: string;
+    receivedRiskIds: string[];
+    remarks: string;
+  }) => string;
+  getHandoverRecords: (scoped?: boolean) => HandoverRecord[];
 
   getFilteredRiskCards: () => RiskCardData[];
   getOverdueRiskCards: (scoped?: boolean) => RiskCardData[];
+  getEscalatedRiskCards: (scoped?: boolean) => RiskCardData[];
   getMeasuresByRiskId: (riskId: string) => RiskMeasure[];
   getRiskCountByLevel: (scoped?: boolean) => { high: number; medium: number; low: number };
   getRecordsByRiskId: (riskId: string) => TrackingRecord[];
@@ -60,9 +102,10 @@ interface RiskState {
     closed: number;
     overdue: number;
     high: number;
+    escalated: number;
   }>;
 
-  getRisksByTeam: (team: string) => RiskCardData[];
+  getRisksByTeam: (team: string, locationType?: LocationType) => RiskCardData[];
 
   generateHandoverText: () => string;
 }
@@ -80,6 +123,7 @@ export const useRiskStore = create<RiskState>()(
       preShiftForms: [],
       dailyRisks: [],
       trackingRecords: [],
+      handoverRecords: [],
 
       setSelectedBaseId: (id) => set({ selectedBaseId: id, selectedLocationId: null }),
       setSelectedLocationType: (type) => set({ selectedLocationType: type, selectedLocationId: null }),
@@ -106,6 +150,58 @@ export const useRiskStore = create<RiskState>()(
           ),
         })),
 
+      promoteDailyRiskToTracking: (riskId) => {
+        const state = get();
+        const daily = state.dailyRisks.find((r) => r.id === riskId);
+        if (!daily) return null;
+        if (daily.promotedRiskId) return daily.promotedRiskId;
+        const form = state.preShiftForms.find((f) => f.id === daily.formId);
+        if (!form) return null;
+
+        const newId = `risk-${Date.now()}`;
+        const now = new Date();
+        const deadline = new Date(now.getTime() + 8 * 60 * 60 * 1000);
+        const pad = (n: number) => String(n).padStart(2, '0');
+        const fmt = (d: Date) =>
+          `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+
+        const typeMap: Record<string, RiskCardData['type']> = {
+          高空: 'high_altitude',
+          通电: 'power_test',
+          燃油: 'fuel_operation',
+          顶升: 'jacking',
+          拖机: 'towing',
+        };
+        const matchedType = (Object.keys(typeMap).find((k) => daily.description.includes(k)) || 'power_test') as RiskCardData['type'];
+
+        const fallbackLocation =
+          LOCATIONS.find((l) => l.baseId === state.selectedBaseId && l.type === 'hangar') ||
+          LOCATIONS.find((l) => l.baseId === state.selectedBaseId) ||
+          LOCATIONS[0];
+
+        const newCard: RiskCardData = {
+          id: newId,
+          locationId: fallbackLocation?.id || 'loc-1',
+          type: matchedType,
+          level: daily.level,
+          team: form.team,
+          releaseDeadline: fmt(deadline),
+          status: 'open',
+          createdAt: fmt(now),
+          isOverdue: false,
+          sourceWorkCardNo: form.workCardNo,
+          sourceFormId: form.id,
+        };
+
+        set((s) => ({
+          riskCards: [...s.riskCards, newCard],
+          dailyRisks: s.dailyRisks.map((r) =>
+            r.id === riskId ? { ...r, promotedRiskId: newId } : r
+          ),
+        }));
+        return newId;
+      },
+
       addTrackingRecord: (record) =>
         set((state) => ({
           trackingRecords: [...state.trackingRecords, record],
@@ -114,7 +210,14 @@ export const useRiskStore = create<RiskState>()(
       updateRiskStatus: (riskId, status) =>
         set((state) => ({
           riskCards: state.riskCards.map((r) =>
-            r.id === riskId ? { ...r, status } : r
+            r.id === riskId
+              ? {
+                  ...r,
+                  status,
+                  isOverdue: status === 'closed' ? false : r.isOverdue,
+                  escalationLevel: status === 'closed' ? 'none' : r.escalationLevel,
+                }
+              : r
           ),
         })),
 
@@ -123,7 +226,12 @@ export const useRiskStore = create<RiskState>()(
         set((state) => ({
           riskCards: state.riskCards.map((r) =>
             r.id === riskId
-              ? { ...r, status: 'closed' as RiskStatus, isOverdue: false }
+              ? {
+                  ...r,
+                  status: 'closed' as RiskStatus,
+                  isOverdue: false,
+                  escalationLevel: 'none' as EscalationLevel,
+                }
               : r
           ),
           trackingRecords: [
@@ -138,6 +246,106 @@ export const useRiskStore = create<RiskState>()(
             },
           ],
         }));
+      },
+
+      submitTracking: (riskId, payload) => {
+        const now = new Date().toLocaleString('zh-CN');
+        const qualified = isReviewQualified(payload.reviewResult);
+        const nextStatus: RiskStatus = qualified ? 'closed' : 'processing';
+
+        set((state) => ({
+          trackingRecords: [
+            ...state.trackingRecords,
+            {
+              id: `rec-${riskId}-${Date.now()}`,
+              riskId,
+              rectification: payload.rectification,
+              reviewResult: payload.reviewResult,
+              handler: payload.handler,
+              photoUrl: payload.photoUrl,
+              handledAt: now,
+            },
+          ],
+          riskCards: state.riskCards.map((r) =>
+            r.id === riskId
+              ? {
+                  ...r,
+                  status: nextStatus,
+                  isOverdue: nextStatus === 'closed' ? false : r.isOverdue,
+                  escalationLevel: nextStatus === 'closed' ? ('none' as EscalationLevel) : r.escalationLevel,
+                }
+              : r
+          ),
+        }));
+        return nextStatus;
+      },
+
+      escalateRisk: (riskId, level, assignee, operator) => {
+        const now = new Date().toLocaleString('zh-CN');
+        const levelLabel = level === 'manager' ? '值班经理' : '质量安全主管';
+        set((state) => ({
+          riskCards: state.riskCards.map((r) =>
+            r.id === riskId
+              ? {
+                  ...r,
+                  escalationLevel: level,
+                  escalationAssignee: assignee,
+                  escalatedAt: now,
+                }
+              : r
+          ),
+          trackingRecords: [
+            ...state.trackingRecords,
+            {
+              id: `rec-${riskId}-esc-${Date.now()}`,
+              riskId,
+              handler: operator,
+              rectification: `责任升级至${levelLabel}：${assignee}`,
+              reviewResult: `已升级至${levelLabel}跟进`,
+              handledAt: now,
+            },
+          ],
+        }));
+      },
+
+      confirmHandover: (payload) => {
+        const { getFilteredRiskCards } = get();
+        const openRisks = getFilteredRiskCards().filter((r) => r.status !== 'closed');
+        const allIds = openRisks.map((r) => r.id);
+        const receivedSet = new Set(payload.receivedRiskIds);
+        const unreceivedIds = allIds.filter((id) => !receivedSet.has(id));
+        const now = new Date().toLocaleString('zh-CN');
+        const { selectedBaseId, selectedLocationType, selectedLocationId } = get();
+
+        const record: HandoverRecord = {
+          id: `hv-${Date.now()}`,
+          handoverPerson: payload.handoverPerson,
+          receiverPerson: payload.receiverPerson,
+          handoverTime: now,
+          receivedRiskIds: payload.receivedRiskIds,
+          unreceivedRiskIds: unreceivedIds,
+          remarks: payload.remarks,
+          status: 'confirmed',
+          scopeBaseId: selectedBaseId,
+          scopeLocationType: selectedLocationType,
+          scopeLocationId: selectedLocationId,
+        };
+
+        set((state) => ({
+          handoverRecords: [...state.handoverRecords, record],
+        }));
+        return record.id;
+      },
+
+      getHandoverRecords: (scoped = true) => {
+        const { handoverRecords, selectedBaseId, selectedLocationType, selectedLocationId } = get();
+        if (!scoped) return handoverRecords;
+        return handoverRecords.filter((r) => {
+          if (r.scopeBaseId !== selectedBaseId) return false;
+          if (selectedLocationType !== 'all' && r.scopeLocationType !== selectedLocationType) return false;
+          if (selectedLocationId && r.scopeLocationId !== selectedLocationId) return false;
+          return true;
+        });
       },
 
       getFilteredRiskCards: () => {
@@ -156,6 +364,13 @@ export const useRiskStore = create<RiskState>()(
       getOverdueRiskCards: (scoped = true) => {
         const cards = scoped ? get().getFilteredRiskCards() : get().riskCards;
         return cards.filter((card) => card.isOverdue && card.status !== 'closed');
+      },
+
+      getEscalatedRiskCards: (scoped = true) => {
+        const cards = scoped ? get().getFilteredRiskCards() : get().riskCards;
+        return cards.filter(
+          (card) => card.status !== 'closed' && card.escalationLevel && card.escalationLevel !== 'none'
+        );
       },
 
       getMeasuresByRiskId: (riskId) => {
@@ -191,6 +406,7 @@ export const useRiskStore = create<RiskState>()(
           closed: number;
           overdue: number;
           high: number;
+          escalated: number;
         }>();
 
         riskCards.forEach((card) => {
@@ -211,6 +427,7 @@ export const useRiskStore = create<RiskState>()(
               closed: 0,
               overdue: 0,
               high: 0,
+              escalated: 0,
             });
           }
 
@@ -220,24 +437,27 @@ export const useRiskStore = create<RiskState>()(
           if (card.status === 'processing') entry.processing += 1;
           if (card.status === 'closed') entry.closed += 1;
           if (card.isOverdue && card.status !== 'closed') entry.overdue += 1;
-          if (card.level === 'high') entry.high += 1;
+          if (card.level === 'high' && card.status !== 'closed') entry.high += 1;
+          if (card.escalationLevel && card.escalationLevel !== 'none' && card.status !== 'closed') entry.escalated += 1;
         });
 
         return Array.from(teamMap.values()).sort((a, b) => {
           if (b.overdue !== a.overdue) return b.overdue - a.overdue;
+          if (b.escalated !== a.escalated) return b.escalated - a.escalated;
           if (b.high !== a.high) return b.high - a.high;
           return b.open - a.open;
         });
       },
 
-      getRisksByTeam: (team) => {
+      getRisksByTeam: (team, locationType) => {
         const { riskCards, selectedBaseId, selectedLocationType } = get();
+        const effectiveLocationType = locationType ?? selectedLocationType;
         return riskCards.filter((card) => {
           if (card.team !== team) return false;
           const location = LOCATIONS.find((l) => l.id === card.locationId);
           if (!location) return false;
           if (selectedBaseId && location.baseId !== selectedBaseId) return false;
-          if (selectedLocationType !== 'all' && location.type !== selectedLocationType) return false;
+          if (effectiveLocationType !== 'all' && location.type !== effectiveLocationType) return false;
           return true;
         }).sort((a, b) => {
           if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1;
@@ -247,7 +467,7 @@ export const useRiskStore = create<RiskState>()(
       },
 
       generateHandoverText: () => {
-        const { getFilteredRiskCards, getOverdueRiskCards, getMeasuresByRiskId } = get();
+        const { getFilteredRiskCards, getOverdueRiskCards, getEscalatedRiskCards, getMeasuresByRiskId } = get();
         const { selectedBaseId, selectedLocationType, selectedLocationId } = get();
 
         const base = BASES.find((b) => b.id === selectedBaseId);
@@ -261,6 +481,7 @@ export const useRiskStore = create<RiskState>()(
         const allRisks = getFilteredRiskCards();
         const openRisks = allRisks.filter((r) => r.status !== 'closed');
         const overdueRisks = getOverdueRiskCards(true);
+        const escalatedRisks = getEscalatedRiskCards(true);
         const highRisks = openRisks.filter((r) => r.level === 'high');
 
         const teamMap = new Map<string, typeof openRisks>();
@@ -268,6 +489,19 @@ export const useRiskStore = create<RiskState>()(
           if (!teamMap.has(r.team)) teamMap.set(r.team, []);
           teamMap.get(r.team)!.push(r);
         });
+
+        const cardLine = (r: RiskCardData, indent: string) => {
+          const loc = LOCATIONS.find((l) => l.id === r.locationId);
+          const typeLabel =
+            r.type === 'high_altitude' ? '高空作业' :
+            r.type === 'power_test' ? '通电测试' :
+            r.type === 'fuel_operation' ? '燃油作业' :
+            r.type === 'jacking' ? '顶升作业' : '拖机作业';
+          const escLabel = r.escalationLevel === 'manager' ? '【已升级·值班经理】' :
+            r.escalationLevel === 'director' ? '【已升级·质量安全主管】' : '';
+          const wcLabel = r.sourceWorkCardNo ? ` 工卡:${r.sourceWorkCardNo}` : '';
+          return `${indent}【${typeLabel}】${r.aircraftNo || ''}${wcLabel} - ${r.team}${escLabel}\n${indent}位置：${loc?.name || '-'}　时限：${r.releaseDeadline}${r.isOverdue ? '（已超时）' : ''}\n`;
+        };
 
         let text = '';
         text += '═══════════════════════════════════════════════\n';
@@ -283,22 +517,27 @@ export const useRiskStore = create<RiskState>()(
         text += `  未闭环风险总数：${openRisks.length} 项\n`;
         text += `  高风险：${highRisks.length} 项\n`;
         text += `  已超时：${overdueRisks.length} 项\n`;
+        text += `  已升级：${escalatedRisks.length} 项\n`;
         text += `  涉及班组：${teamMap.size} 个\n`;
+
+        if (escalatedRisks.length > 0) {
+          text += `\n───────────────────────────────────────────────\n`;
+          text += '            ⬆ 责任升级项\n';
+          text += '───────────────────────────────────────────────\n\n';
+          escalatedRisks.forEach((r, i) => {
+            const escName = r.escalationLevel === 'manager' ? '值班经理' : '质量安全主管';
+            text += `  ${i + 1}. ${cardLine(r, '     ')}`;
+            text += `     升级跟进：${escName} - ${r.escalationAssignee || '-'}（${r.escalatedAt || '-'}）\n`;
+            text += '\n';
+          });
+        }
 
         if (overdueRisks.length > 0) {
           text += `\n───────────────────────────────────────────────\n`;
           text += '               ⚠ 超时风险项\n';
           text += '───────────────────────────────────────────────\n\n';
           overdueRisks.forEach((r, i) => {
-            const loc = LOCATIONS.find((l) => l.id === r.locationId);
-            const typeLabel =
-              r.type === 'high_altitude' ? '高空作业' :
-              r.type === 'power_test' ? '通电测试' :
-              r.type === 'fuel_operation' ? '燃油作业' :
-              r.type === 'jacking' ? '顶升作业' : '拖机作业';
-            text += `  ${i + 1}.【${typeLabel}】${r.aircraftNo || ''} - ${r.team}\n`;
-            text += `     位置：${loc?.name || '-'}\n`;
-            text += `     时限：${r.releaseDeadline} （已超时）\n`;
+            text += `  ${i + 1}. ${cardLine(r, '     ')}`;
             const measures = getMeasuresByRiskId(r.id);
             const unclosed = measures.filter((m) => !m.isClosed);
             if (unclosed.length > 0) {
@@ -318,20 +557,15 @@ export const useRiskStore = create<RiskState>()(
         if (highRisks.length === 0) {
           text += '  暂无高风险项\n\n';
         } else {
-          highRisks.forEach((r, i) => {
+          let idx = 0;
+          highRisks.forEach((r) => {
             if (r.isOverdue) return;
-            const loc = LOCATIONS.find((l) => l.id === r.locationId);
-            const typeLabel =
-              r.type === 'high_altitude' ? '高空作业' :
-              r.type === 'power_test' ? '通电测试' :
-              r.type === 'fuel_operation' ? '燃油作业' :
-              r.type === 'jacking' ? '顶升作业' : '拖机作业';
+            idx += 1;
             const statusLabel =
               r.status === 'open' ? '待处理' :
               r.status === 'processing' ? '处理中' : '已闭环';
-            text += `  ${i + 1}.【${typeLabel}】${r.aircraftNo || ''} - ${r.team}\n`;
-            text += `     状态：${statusLabel}　位置：${loc?.name || '-'}\n`;
-            text += `     时限：${r.releaseDeadline}\n`;
+            text += `  ${idx}. ${cardLine(r, '     ')}`;
+            text += `     状态：${statusLabel}\n`;
             const measures = getMeasuresByRiskId(r.id);
             const unclosed = measures.filter((m) => !m.isClosed);
             if (unclosed.length > 0) {
@@ -351,11 +585,19 @@ export const useRiskStore = create<RiskState>()(
         teamMap.forEach((risks, team) => {
           const openCount = risks.filter((r) => r.status === 'open').length;
           const procCount = risks.filter((r) => r.status === 'processing').length;
-          const overdueCount = risks.filter((r) => r.isOverdue).length;
+          const overdueCount = risks.filter((r) => r.isOverdue && r.status !== 'closed').length;
           const highCount = risks.filter((r) => r.level === 'high').length;
+          const escCount = risks.filter((r) => r.escalationLevel && r.escalationLevel !== 'none').length;
+          const wcSet = new Set(
+            risks.map((r) => r.sourceWorkCardNo).filter(Boolean) as string[]
+          );
           text += `  ▶ ${team}\n`;
           text += `     未闭环：${risks.length} 项（待处理 ${openCount} / 处理中 ${procCount}）\n`;
-          text += `     高风险：${highCount} 项　超时：${overdueCount} 项\n\n`;
+          text += `     高风险：${highCount} 项　超时：${overdueCount} 项　已升级：${escCount} 项\n`;
+          if (wcSet.size > 0) {
+            text += `     关联工卡：${Array.from(wcSet).join('、')}\n`;
+          }
+          text += '\n';
         });
 
         text += '═══════════════════════════════════════════════\n';
@@ -373,6 +615,7 @@ export const useRiskStore = create<RiskState>()(
         preShiftForms: state.preShiftForms,
         dailyRisks: state.dailyRisks,
         trackingRecords: state.trackingRecords,
+        handoverRecords: state.handoverRecords,
       }),
     }
   )
