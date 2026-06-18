@@ -24,6 +24,8 @@ import {
   ChevronDown,
   Search,
   ShieldAlert,
+  Circle,
+  PlayCircle,
 } from 'lucide-react';
 
 interface RiskTrackingListProps {
@@ -271,35 +273,46 @@ export default function RiskTrackingList({ onSelectRisk }: RiskTrackingListProps
                         </span>
                       </td>
                       <td className="px-6 py-4">
-                        <div className="relative">
-                          <button
-                            onClick={() =>
-                              setShowStatusMenu(showStatusMenu === risk.id ? null : risk.id)
-                            }
-                            className="flex items-center gap-1"
-                          >
-                            <Badge status={risk.status} />
-                            <ChevronDown className="w-3 h-3 text-dashboard-muted" />
-                          </button>
-                          {showStatusMenu === risk.id && (
-                            <div className="absolute left-0 top-full mt-1 z-10 bg-dashboard-card border border-dashboard-border rounded-lg shadow-lg py-1 min-w-28">
-                              {(['open', 'processing', 'closed'] as RiskStatus[]).map((s) => (
-                                <button
-                                  key={s}
-                                  onClick={() => {
-                                    updateRiskStatus(risk.id, s);
-                                    setShowStatusMenu(null);
-                                  }}
-                                  className={cn(
-                                    'w-full text-left px-3 py-2 text-sm hover:bg-dashboard-border transition-colors',
-                                    risk.status === s
-                                      ? 'text-accent-blue font-medium'
-                                      : 'text-dashboard-text'
-                                  )}
-                                >
-                                  {getStatusLabel(s)}
-                                </button>
-                              ))}
+                        <div className="flex items-center gap-2">
+                          <Badge status={risk.status} />
+                          {risk.status !== 'closed' && (
+                            <button
+                              onClick={() =>
+                                setShowStatusMenu(showStatusMenu === risk.id ? null : risk.id)
+                              }
+                              className="text-dashboard-muted hover:text-white transition-colors"
+                              title="切换状态"
+                            >
+                              <ChevronDown className="w-3 h-3" />
+                            </button>
+                          )}
+                          {showStatusMenu === risk.id && risk.status !== 'closed' && (
+                            <div className="relative">
+                              <div className="absolute right-0 top-full mt-1 z-20 bg-dashboard-card border border-dashboard-border rounded-lg shadow-lg py-1 min-w-32">
+                                {(['open', 'processing'] as RiskStatus[]).map((s) => (
+                                  <button
+                                    key={s}
+                                    onClick={() => {
+                                      updateRiskStatus(risk.id, s);
+                                      setShowStatusMenu(null);
+                                    }}
+                                    className={cn(
+                                      'w-full text-left px-3 py-2 text-sm hover:bg-dashboard-border transition-colors flex items-center gap-2',
+                                      risk.status === s
+                                        ? 'text-accent-blue font-medium'
+                                        : 'text-dashboard-text'
+                                    )}
+                                  >
+                                    {s === 'open' && <Circle size={12} className="text-risk-high" />}
+                                    {s === 'processing' && <PlayCircle size={12} className="text-risk-medium" />}
+                                    {getStatusLabel(s)}
+                                  </button>
+                                ))}
+                                <div className="border-t border-dashboard-border my-1" />
+                                <div className="px-3 py-2 text-xs text-dashboard-muted">
+                                  需通过处理表单提交合格复核后闭环
+                                </div>
+                              </div>
                             </div>
                           )}
                         </div>

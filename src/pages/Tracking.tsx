@@ -4,6 +4,7 @@ import RiskTrackingList from '@/components/tracking/RiskTrackingList';
 import TrackingForm from '@/components/tracking/TrackingForm';
 import HandoverView from '@/components/tracking/HandoverView';
 import HandoverConfirmModal from '@/components/tracking/HandoverConfirmModal';
+import HandoverRecordDetail from '@/components/tracking/HandoverRecordDetail';
 import { useRiskStore } from '@/store/useRiskStore';
 import {
   ClipboardList,
@@ -16,12 +17,16 @@ import {
   User,
   Clock,
   AlertTriangle,
+  ChevronRight,
+  FileText,
+  BarChart3,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import Button from '@/components/common/Button';
 import Modal from '@/components/common/Modal';
 
 type ViewMode = 'list' | 'handover';
+type ExportMode = 'standard' | 'review';
 
 export default function Tracking() {
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -30,8 +35,11 @@ export default function Tracking() {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [isConfirmModalOpen, setIsConfirmModalOpen] = useState(false);
   const [isHistoryOpen, setIsHistoryOpen] = useState(false);
+  const [isRecordDetailOpen, setIsRecordDetailOpen] = useState(false);
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null);
+  const [exportMode, setExportMode] = useState<ExportMode>('standard');
   const [copied, setCopied] = useState(false);
-  const { generateHandoverText, getHandoverRecords } = useRiskStore();
+  const { generateHandoverText, generateReviewHandoverText, getHandoverRecords } = useRiskStore();
 
   const handleSelectRisk = (riskId: string) => {
     setSelectedRiskId(riskId);
@@ -49,7 +57,7 @@ export default function Tracking() {
   };
 
   const handleCopy = async () => {
-    const text = generateHandoverText();
+    const text = exportMode === 'review' ? generateReviewHandoverText() : generateHandoverText();
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -59,7 +67,13 @@ export default function Tracking() {
     }
   };
 
+  const handleViewRecord = (recordId: string) => {
+    setSelectedRecordId(recordId);
+    setIsRecordDetailOpen(true);
+  };
+
   const handoverText = generateHandoverText();
+  const reviewText = generateReviewHandoverText();
   const handoverRecords = getHandoverRecords(true);
 
   return (
@@ -144,10 +158,33 @@ export default function Tracking() {
         size="xl"
       >
         <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-sm text-dashboard-muted">
-              以下为当前筛选范围的交接单文本，可复制后粘贴到交接系统或邮件中
-            </p>
+          <div className="flex items-center justify-between flex-wrap gap-3">
+            <div className="flex items-center gap-2 p-1 bg-dashboard-card rounded-lg border border-dashboard-border">
+              <button
+                onClick={() => setExportMode('standard')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all',
+                  exportMode === 'standard'
+                    ? 'bg-accent-blue text-white'
+                    : 'text-dashboard-muted hover:text-white'
+                )}
+              >
+                <FileText size={14} />
+                标准版
+              </button>
+              <button
+                onClick={() => setExportMode('review')}
+                className={cn(
+                  'flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all',
+                  exportMode === 'review'
+                    ? 'bg-accent-blue text-white'
+                    : 'text-dashboard-muted hover:text-white'
+                )}
+              >
+                <BarChart3 size={14} />
+                复盘版
+              </button>
+            </div>
             <Button variant="secondary" size="sm" onClick={handleCopy}>
               {copied ? (
                 <>
@@ -162,9 +199,15 @@ export default function Tracking() {
               )}
             </Button>
           </div>
+          <p className="text-sm text-dashboard-muted">
+            {exportMode === 'review'
+              ? '复盘版包含总体概览、升级项、超时项、当班新转入、当班已闭环、未接收项，适合晨会直接使用'
+              : '标准版侧重未闭环风险交接清单，适合交接班直接用于日常交接班使用'
+            }
+          </p>
           <div className="relative">
-            <pre className="bg-dashboard-bg border border-dashboard-border rounded-lg p-4 text-sm text-dashboard-text font-mono whitespace-pre-wrap leading-relaxed max-h-[60vh] overflow-auto">
-              {handoverText}
+            <pre className="bg-dashboard-bg border border-dashboard-border rounded-lg p-4 text-sm text-dashboard-text font-mono whitespace-pre-wrap leading-relaxed max-h-[55vh] overflow-auto">
+              {exportMode === 'review' ? reviewText : handoverText}
             </pre>
           </div>
           <div className="flex items-center justify-between gap-3 pt-2">
@@ -203,7 +246,8 @@ export default function Tracking() {
               .map((rec) => (
                 <div
                   key={rec.id}
-                  className="bg-dashboard-card rounded-lg p-4 border border-dashboard-border"
+                  onClick={() => handleViewRecord(rec.id)}
+                  className="bg-dashboard-card rounded-lg p-4 border border-dashboard-border cursor-pointer hover:border-accent-blue/50 hover:bg-dashboard-card/80 transition-all group"
                 >
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
@@ -213,9 +257,12 @@ export default function Tracking() {
                         已确认
                       </span>
                     </div>
-                    <div className="flex items-center gap-1.5 text-xs text-dashboard-muted">
-                      <Clock size={12} />
-                      <span className="font-mono">{rec.handoverTime}</span>
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 text-xs text-dashboard-muted">
+                        <Clock size={12} />
+                        <span className="font-mono">{rec.handoverTime}</span>
+                      </div>
+                      <ChevronRight size={14} className="text-dashboard-muted group-hover:text-accent-blue transition-colors" />
                     </div>
                   </div>
                   <div className="grid grid-cols-3 gap-3 text-sm mb-3">
@@ -257,7 +304,7 @@ export default function Tracking() {
                   {rec.remarks && (
                     <div className="mt-2 pt-2 border-t border-dashboard-border">
                       <div className="text-xs text-dashboard-muted mb-0.5">接班备注</div>
-                      <p className="text-sm text-dashboard-text">{rec.remarks}</p>
+                      <p className="text-sm text-dashboard-text line-clamp-2">{rec.remarks}</p>
                     </div>
                   )}
                 </div>
@@ -265,6 +312,12 @@ export default function Tracking() {
           )}
         </div>
       </Modal>
+
+      <HandoverRecordDetail
+        isOpen={isRecordDetailOpen}
+        onClose={() => setIsRecordDetailOpen(false)}
+        recordId={selectedRecordId}
+      />
     </div>
   );
 }

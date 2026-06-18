@@ -75,7 +75,8 @@ interface RiskState {
     payload: { rectification: string; reviewResult: string; handler: string; photoUrl?: string }
   ) => RiskStatus;
 
-  escalateRisk: (riskId: string, level: EscalationLevel, assignee: string, operator: string) => void;
+  escalateRisk: (riskId: string, level: EscalationLevel, assignee: string, operator: string, note?: string) => void;
+  reassignEscalation: (riskId: string, assignee: string, operator: string, note?: string) => void;
 
   confirmHandover: (payload: {
     handoverPerson: string;
@@ -84,6 +85,8 @@ interface RiskState {
     remarks: string;
   }) => string;
   getHandoverRecords: (scoped?: boolean) => HandoverRecord[];
+  getHandoverRecordById: (id: string) => HandoverRecord | undefined;
+  supplementaryHandoverReceive: (recordId: string, riskIds: string[], operator: string, note?: string) => void;
 
   getFilteredRiskCards: () => RiskCardData[];
   getOverdueRiskCards: (scoped?: boolean) => RiskCardData[];
@@ -107,7 +110,12 @@ interface RiskState {
 
   getRisksByTeam: (team: string, locationType?: LocationType) => RiskCardData[];
 
+  getPreShiftFormById: (formId: string) => PreShiftFormData | undefined;
+  getDailyRisksByFormId: (formId: string) => DailyRisk[];
+  getRiskBySourceFormId: (formId: string) => RiskCardData[];
+
   generateHandoverText: () => string;
+  generateReviewHandoverText: () => string;
 }
 
 export const useRiskStore = create<RiskState>()(
@@ -280,9 +288,17 @@ export const useRiskStore = create<RiskState>()(
         return nextStatus;
       },
 
-      escalateRisk: (riskId, level, assignee, operator) => {
+      escalateRisk: (riskId, level, assignee, operator, note) => {
         const now = new Date().toLocaleString('zh-CN');
         const levelLabel = level === 'manager' ? '值班经理' : '质量安全主管';
+        const historyEntry = {
+          id: `eh-${Date.now()}`,
+          level,
+          assignee,
+          operator,
+          time: now,
+          note,
+        };
         set((state) => ({
           riskCards: state.riskCards.map((r) =>
             r.id === riskId
@@ -291,6 +307,7 @@ export const useRiskStore = create<RiskState>()(
                   escalationLevel: level,
                   escalationAssignee: assignee,
                   escalatedAt: now,
+                  escalationHistory: [...(r.escalationHistory || []), historyEntry],
                 }
               : r
           ),
@@ -300,8 +317,45 @@ export const useRiskStore = create<RiskState>()(
               id: `rec-${riskId}-esc-${Date.now()}`,
               riskId,
               handler: operator,
-              rectification: `责任升级至${levelLabel}：${assignee}`,
+              rectification: `责任升级至${levelLabel}：${assignee}${note ? '（' + note + '）' : ''}`,
               reviewResult: `已升级至${levelLabel}跟进`,
+              handledAt: now,
+            },
+          ],
+        }));
+      },
+
+      reassignEscalation: (riskId, assignee, operator, note) => {
+        const now = new Date().toLocaleString('zh-CN');
+        const risk = get().riskCards.find((r) => r.id === riskId);
+        if (!risk || !risk.escalationLevel || risk.escalationLevel === 'none') return;
+        const levelLabel = risk.escalationLevel === 'manager' ? '值班经理' : '质量安全主管';
+        const historyEntry = {
+          id: `eh-${Date.now()}`,
+          level: risk.escalationLevel,
+          assignee,
+          operator,
+          time: now,
+          note: note || '改派跟进人',
+        };
+        set((state) => ({
+          riskCards: state.riskCards.map((r) =>
+            r.id === riskId
+              ? {
+                  ...r,
+                  escalationAssignee: assignee,
+                  escalationHistory: [...(r.escalationHistory || []), historyEntry],
+                }
+              : r
+          ),
+          trackingRecords: [
+            ...state.trackingRecords,
+            {
+              id: `rec-${riskId}-reassign-${Date.now()}`,
+              riskId,
+              handler: operator,
+              rectification: `${levelLabel}跟进人改派：${assignee}${note ? '（' + note + '）' : ''}`,
+              reviewResult: `改派至${assignee}跟进`,
               handledAt: now,
             },
           ],
@@ -346,6 +400,36 @@ export const useRiskStore = create<RiskState>()(
           if (selectedLocationId && r.scopeLocationId !== selectedLocationId) return false;
           return true;
         });
+      },
+
+      getHandoverRecordById: (id) => {
+        return get().handoverRecords.find((r) => r.id === id);
+      },
+
+      supplementaryHandoverReceive: (recordId, riskIds, operator, note) => {
+        if (riskIds.length === 0) return;
+        const now = new Date().toLocaleString('zh-CN');
+        const supRec = {
+          id: `sup-${Date.now()}`,
+          riskIds,
+          operator,
+          time: now,
+          note,
+        };
+        set((state) => ({
+          handoverRecords: state.handoverRecords.map((r) => {
+            if (r.id !== recordId) return r;
+            const receivedSet = new Set(r.receivedRiskIds);
+            riskIds.forEach((id) => receivedSet.add(id));
+            const newUnreceived = r.unreceivedRiskIds.filter((id) => !receivedSet.has(id));
+            return {
+              ...r,
+              receivedRiskIds: Array.from(receivedSet),
+              unreceivedRiskIds: newUnreceived,
+              supplementaryRecords: [...(r.supplementaryRecords || []), supRec],
+            };
+          }),
+        }));
       },
 
       getFilteredRiskCards: () => {
@@ -464,6 +548,18 @@ export const useRiskStore = create<RiskState>()(
           const levelOrder = { high: 0, medium: 1, low: 2 };
           return levelOrder[a.level] - levelOrder[b.level];
         });
+      },
+
+      getPreShiftFormById: (formId) => {
+        return get().preShiftForms.find((f) => f.id === formId);
+      },
+
+      getDailyRisksByFormId: (formId) => {
+        return get().dailyRisks.filter((r) => r.formId === formId);
+      },
+
+      getRiskBySourceFormId: (formId) => {
+        return get().riskCards.filter((r) => r.sourceFormId === formId);
       },
 
       generateHandoverText: () => {
@@ -602,6 +698,145 @@ export const useRiskStore = create<RiskState>()(
 
         text += '═══════════════════════════════════════════════\n';
         text += '             交接确认：______________\n';
+        text += '═══════════════════════════════════════════════\n';
+
+        return text;
+      },
+
+      generateReviewHandoverText: () => {
+        const { getFilteredRiskCards, getOverdueRiskCards, getEscalatedRiskCards, getMeasuresByRiskId, getRecordsByRiskId } = get();
+        const { selectedBaseId, selectedLocationType, selectedLocationId, preShiftForms, dailyRisks } = get();
+
+        const base = BASES.find((b) => b.id === selectedBaseId);
+        const location = selectedLocationId ? LOCATIONS.find((l) => l.id === selectedLocationId) : null;
+
+        const locationTypeLabel =
+          selectedLocationType === 'all' ? '全部区域' :
+          selectedLocationType === 'hangar' ? '机库' :
+          selectedLocationType === 'apron' ? '停机坪' : '航线维修';
+
+        const allRisks = getFilteredRiskCards();
+        const openRisks = allRisks.filter((r) => r.status !== 'closed');
+        const closedRisks = allRisks.filter((r) => r.status === 'closed');
+        const overdueRisks = getOverdueRiskCards(true);
+        const escalatedRisks = getEscalatedRiskCards(true);
+        const highRisks = openRisks.filter((r) => r.level === 'high');
+
+        const todayStr = new Date().toLocaleDateString('zh-CN');
+        const todayNewRisks = openRisks.filter((r) => r.createdAt.startsWith(todayStr));
+        const todayClosed = closedRisks.filter((r) => {
+          const records = getRecordsByRiskId(r.id);
+          return records.length > 0 && records.some((rec) => rec.handledAt.startsWith(todayStr));
+        });
+
+        const todayForms = preShiftForms.filter((f) => f.createdAt.startsWith(todayStr));
+        const newPromotedIds = new Set<string>();
+        todayForms.forEach((f) => {
+          const risks = dailyRisks.filter((d) => d.formId === f.id && d.promotedRiskId);
+          risks.forEach((r) => r.promotedRiskId && newPromotedIds.add(r.promotedRiskId));
+        });
+        const newPromotedRisks = openRisks.filter((r) => newPromotedIds.has(r.id));
+
+        const cardLine = (r: RiskCardData, indent: string) => {
+          const loc = LOCATIONS.find((l) => l.id === r.locationId);
+          const typeLabel =
+            r.type === 'high_altitude' ? '高空作业' :
+            r.type === 'power_test' ? '通电测试' :
+            r.type === 'fuel_operation' ? '燃油作业' :
+            r.type === 'jacking' ? '顶升作业' : '拖机作业';
+          const escLabel = r.escalationLevel === 'manager' ? '【已升级·值班经理】' :
+            r.escalationLevel === 'director' ? '【已升级·质量安全主管】' : '';
+          const wcLabel = r.sourceWorkCardNo ? ` 工卡:${r.sourceWorkCardNo}` : '';
+          const statusLabel = r.status === 'open' ? '【待处理】' : r.status === 'processing' ? '【处理中】' : '【已闭环】';
+          return `${indent}${statusLabel}【${typeLabel}】${r.aircraftNo || ''}${wcLabel} - ${r.team}${escLabel}\n${indent}位置：${loc?.name || '-'}　时限：${r.releaseDeadline}${r.isOverdue ? '（已超时）' : ''}\n`;
+        };
+
+        let text = '';
+        text += '═══════════════════════════════════════════════\n';
+        text += '         航 维 风 险 交 接 复 盘 版\n';
+        text += '═══════════════════════════════════════════════\n\n';
+        text += `报告时间：${new Date().toLocaleString('zh-CN')}\n`;
+        text += `基地：${base?.name || '全部基地'}\n`;
+        text += `区域类型：${locationTypeLabel}\n`;
+        if (location) text += `具体位置：${location.name}\n`;
+        text += `\n───────────────────────────────────────────────\n`;
+        text += '                一、总体概览\n';
+        text += '───────────────────────────────────────────────\n\n';
+        text += `  风险总数：${allRisks.length} 项\n`;
+        text += `  未闭环：${openRisks.length} 项（待处理 ${allRisks.filter(r => r.status === 'open').length} / 处理中 ${allRisks.filter(r => r.status === 'processing').length}）\n`;
+        text += `  已闭环：${closedRisks.length} 项\n`;
+        text += `  高风险：${highRisks.length} 项　已超时：${overdueRisks.length} 项　已升级：${escalatedRisks.length} 项\n`;
+        text += `  当班新转入：${newPromotedRisks.length} 项　当班已闭环：${todayClosed.length} 项\n`;
+
+        if (escalatedRisks.length > 0) {
+          text += `\n───────────────────────────────────────────────\n`;
+          text += '            二、⬆ 责任升级项（需重点关注）\n';
+          text += '───────────────────────────────────────────────\n\n';
+          escalatedRisks.forEach((r, i) => {
+            const escName = r.escalationLevel === 'manager' ? '值班经理' : '质量安全主管';
+            text += `  ${i + 1}. ${cardLine(r, '     ')}`;
+            text += `     升级跟进：${escName} - ${r.escalationAssignee || '-'}（${r.escalatedAt || '-'}）\n`;
+            text += '\n';
+          });
+        }
+
+        if (overdueRisks.length > 0) {
+          text += `───────────────────────────────────────────────\n`;
+          text += '               三、⚠ 超时风险项\n';
+          text += '───────────────────────────────────────────────\n\n';
+          overdueRisks.forEach((r, i) => {
+            text += `  ${i + 1}. ${cardLine(r, '     ')}`;
+            const measures = getMeasuresByRiskId(r.id);
+            const unclosed = measures.filter((m) => !m.isClosed);
+            if (unclosed.length > 0) {
+              text += `     未关闭措施（${unclosed.length}项）：\n`;
+              unclosed.forEach((m) => {
+                text += `       • ${m.content}\n`;
+              });
+            }
+            text += '\n';
+          });
+        }
+
+        if (newPromotedRisks.length > 0) {
+          text += `───────────────────────────────────────────────\n`;
+          text += '            四、🆕 当班新转入风险\n';
+          text += '───────────────────────────────────────────────\n\n';
+          newPromotedRisks.forEach((r, i) => {
+            text += `  ${i + 1}. ${cardLine(r, '     ')}`;
+            text += `     来源：班前确认工卡 ${r.sourceWorkCardNo || '未知'}\n`;
+            text += '\n';
+          });
+        }
+
+        if (todayClosed.length > 0) {
+          text += `───────────────────────────────────────────────\n`;
+          text += '            五、✅ 当班已闭环风险\n';
+          text += '───────────────────────────────────────────────\n\n';
+          todayClosed.forEach((r, i) => {
+            text += `  ${i + 1}. ${cardLine(r, '     ')}`;
+            text += '\n';
+          });
+        }
+
+        const unreceivedFromLast = (() => {
+          const lastRecord = get().getHandoverRecords(true).slice(-1)[0];
+          if (!lastRecord) return [];
+          return openRisks.filter((r) => lastRecord.unreceivedRiskIds.includes(r.id));
+        })();
+
+        if (unreceivedFromLast.length > 0) {
+          text += `───────────────────────────────────────────────\n`;
+          text += '          六、📋 上一班未接收项（需跟进）\n';
+          text += '───────────────────────────────────────────────\n\n';
+          unreceivedFromLast.forEach((r, i) => {
+            text += `  ${i + 1}. ${cardLine(r, '     ')}`;
+            text += '\n';
+          });
+        }
+
+        text += '═══════════════════════════════════════════════\n';
+        text += '   晨会要点：高风险 ' + highRisks.length + ' 项　升级 ' + escalatedRisks.length + ' 项　超时 ' + overdueRisks.length + ' 项\n';
         text += '═══════════════════════════════════════════════\n';
 
         return text;

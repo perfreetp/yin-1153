@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Modal from '@/components/common/Modal';
 import Badge from '@/components/common/Badge';
 import Button from '@/components/common/Button';
+import WorkCardDetailModal from '@/components/preshift/WorkCardDetailModal';
 import { useRiskStore } from '@/store/useRiskStore';
 import { LOCATIONS } from '@/data/mockData';
 import {
@@ -25,6 +27,7 @@ import {
   History,
   User,
   ShieldAlert,
+  ExternalLink,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -38,6 +41,8 @@ export default function RiskDetailModal() {
     getRecordsByRiskId,
     closeRiskDetail,
   } = useRiskStore();
+
+  const [isWorkCardOpen, setIsWorkCardOpen] = useState(false);
 
   const risk = riskCards.find((r) => r.id === selectedRiskId);
   const measures = selectedRiskId ? getMeasuresByRiskId(selectedRiskId) : [];
@@ -55,13 +60,20 @@ export default function RiskDetailModal() {
     navigate('/tracking');
   };
 
+  const handleViewWorkCard = () => {
+    if (risk.sourceFormId) {
+      setIsWorkCardOpen(true);
+    }
+  };
+
   return (
-    <Modal
-      isOpen={isDetailModalOpen}
-      onClose={closeRiskDetail}
-      title="风险详情"
-      size="xl"
-    >
+    <>
+      <Modal
+        isOpen={isDetailModalOpen}
+        onClose={closeRiskDetail}
+        title="风险详情"
+        size="xl"
+      >
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
         <div className="lg:col-span-3 space-y-5">
           <div className="flex items-start justify-between">
@@ -125,12 +137,18 @@ export default function RiskDetailModal() {
             />
             <InfoCard icon={Calendar} label="创建时间" value={risk.createdAt} />
             {risk.sourceWorkCardNo && (
-              <InfoCard
-                icon={FileText}
-                label="来源工卡"
-                value={risk.sourceWorkCardNo}
-                mono
-              />
+              <button
+                onClick={handleViewWorkCard}
+                className="text-left hover:bg-dashboard-surface/50 transition-colors"
+              >
+                <InfoCard
+                  icon={ExternalLink}
+                  label="来源工卡"
+                  value={risk.sourceWorkCardNo}
+                  mono
+                  clickable
+                />
+              </button>
             )}
             {risk.escalationAssignee && (
               <InfoCard
@@ -272,6 +290,18 @@ export default function RiskDetailModal() {
         </Button>
       </div>
     </Modal>
+
+    <WorkCardDetailModal
+      isOpen={isWorkCardOpen}
+      onClose={() => setIsWorkCardOpen(false)}
+      formId={risk.sourceFormId || null}
+      onGoToTracking={() => {
+        setIsWorkCardOpen(false);
+        closeRiskDetail();
+        navigate('/tracking');
+      }}
+    />
+    </>
   );
 }
 
@@ -281,23 +311,27 @@ function InfoCard({
   value,
   highlight,
   mono,
+  clickable,
 }: {
   icon: React.ElementType;
   label: string;
   value: string;
   highlight?: boolean;
   mono?: boolean;
+  clickable?: boolean;
 }) {
   return (
     <div
       className={cn(
-        'bg-dashboard-card rounded-lg p-3 border',
-        highlight ? 'border-risk-high/50' : 'border-dashboard-border'
+        'bg-dashboard-card rounded-lg p-3 border transition-all',
+        highlight ? 'border-risk-high/50' : 'border-dashboard-border',
+        clickable && 'cursor-pointer hover:border-accent-blue/50 hover:bg-dashboard-card/80'
       )}
     >
       <div className="flex items-center gap-2 text-dashboard-muted text-xs mb-1">
         <Icon size={14} />
         <span>{label}</span>
+        {clickable && <span className="text-accent-blue">(点击查看)</span>}
       </div>
       <div
         className={cn(

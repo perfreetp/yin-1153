@@ -22,6 +22,8 @@ import {
   ShieldAlert,
   TrendingUp,
   Info,
+  UserPlus,
+  History,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -48,6 +50,7 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
     riskCards,
     submitTracking,
     escalateRisk,
+    reassignEscalation,
     getRecordsByRiskId,
   } = useRiskStore();
 
@@ -61,6 +64,9 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
   const [showEscalation, setShowEscalation] = useState(false);
   const [escAssignee, setEscAssignee] = useState('');
   const [escLevel, setEscLevel] = useState<EscalationLevel>('manager');
+  const [showReassign, setShowReassign] = useState(false);
+  const [reassignAssignee, setReassignAssignee] = useState('');
+  const [reassignNote, setReassignNote] = useState('');
 
   const risk = riskCards.find((r) => r.id === riskId);
   const existingRecords = riskId ? getRecordsByRiskId(riskId) : [];
@@ -78,6 +84,9 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
       setShowEscalation(false);
       setEscAssignee('');
       setEscLevel('manager');
+      setShowReassign(false);
+      setReassignAssignee('');
+      setReassignNote('');
     }
   }, [isOpen, riskId]);
 
@@ -112,6 +121,14 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
     escalateRisk(riskId, escLevel, escAssignee.trim(), formData.handler);
     setShowEscalation(false);
     setEscAssignee('');
+  };
+
+  const handleReassign = () => {
+    if (!riskId || !reassignAssignee.trim()) return;
+    reassignEscalation(riskId, reassignAssignee.trim(), formData.handler, reassignNote.trim() || undefined);
+    setShowReassign(false);
+    setReassignAssignee('');
+    setReassignNote('');
   };
 
   if (!risk) return null;
@@ -316,14 +333,38 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
           <div className="bg-dashboard-card rounded-lg p-4 border border-dashboard-border">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-sm font-semibold text-white">提交操作</h4>
-              <button
-                onClick={() => setShowEscalation(!showEscalation)}
-                className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
-              >
-                <TrendingUp size={14} />
-                责任升级
-              </button>
+              <div className="flex items-center gap-3">
+                {isEscalated && (
+                  <button
+                    onClick={() => setShowReassign(!showReassign)}
+                    className="flex items-center gap-1 text-xs text-accent-blue hover:text-accent-blue/80 transition-colors"
+                  >
+                    <UserPlus size={14} />
+                    改派跟进人
+                  </button>
+                )}
+                <button
+                  onClick={() => setShowEscalation(!showEscalation)}
+                  className="flex items-center gap-1 text-xs text-orange-400 hover:text-orange-300 transition-colors"
+                >
+                  <TrendingUp size={14} />
+                  {isEscalated ? '调整升级等级' : '责任升级'}
+                </button>
+              </div>
             </div>
+
+            {isEscalated && risk.escalationAssignee && (
+              <div className="mb-3 flex items-center gap-2 p-2.5 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+                <ShieldAlert size={16} className="text-orange-400 flex-shrink-0" />
+                <div className="flex-1 text-sm">
+                  <span className="text-orange-400 font-medium">
+                    已升级至{risk.escalationLevel === 'manager' ? '值班经理' : '质量安全主管'}
+                  </span>
+                  <span className="text-dashboard-text">　跟进人：{risk.escalationAssignee}</span>
+                </div>
+                <span className="text-xs text-dashboard-muted font-mono">{risk.escalatedAt}</span>
+              </div>
+            )}
 
             {showEscalation && (
               <div className="mb-3 p-3 bg-orange-500/10 border border-orange-500/30 rounded-lg space-y-3 animate-fade-in-up">
@@ -360,6 +401,61 @@ export default function TrackingForm({ isOpen, onClose, riskId }: TrackingFormPr
                     <ShieldAlert size={14} />
                     <span>确认升级</span>
                   </Button>
+                </div>
+              </div>
+            )}
+
+            {showReassign && (
+              <div className="mb-3 p-3 bg-accent-blue/10 border border-accent-blue/30 rounded-lg space-y-3 animate-fade-in-up">
+                <div className="flex items-center gap-2 text-xs text-accent-blue">
+                  <UserPlus size={14} />
+                  <span>改派当前升级的跟进人，改派记录将写入时间线</span>
+                </div>
+                <input
+                  type="text"
+                  placeholder="新跟进人姓名"
+                  value={reassignAssignee}
+                  onChange={(e) => setReassignAssignee(e.target.value)}
+                  className="input-field w-full text-sm py-1.5"
+                />
+                <input
+                  type="text"
+                  placeholder="改派原因（可选）"
+                  value={reassignNote}
+                  onChange={(e) => setReassignNote(e.target.value)}
+                  className="input-field w-full text-sm py-1.5"
+                />
+                <div className="flex justify-end gap-2">
+                  <Button variant="secondary" size="sm" onClick={() => setShowReassign(false)}>
+                    取消
+                  </Button>
+                  <Button size="sm" onClick={handleReassign} disabled={!reassignAssignee.trim()}>
+                    <UserPlus size={14} />
+                    <span>确认改派</span>
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {risk.escalationHistory && risk.escalationHistory.length > 1 && (
+              <div className="mb-3">
+                <div className="flex items-center gap-1.5 text-xs text-dashboard-muted mb-2">
+                  <History size={12} />
+                  <span>升级历史</span>
+                </div>
+                <div className="space-y-1.5 max-h-24 overflow-y-auto">
+                  {risk.escalationHistory.slice().reverse().map((h, idx) => (
+                    <div key={h.id} className="flex items-center gap-2 text-xs text-dashboard-text">
+                      <span className="w-1 h-1 rounded-full bg-orange-400 flex-shrink-0" />
+                      <span className="text-orange-400">
+                        {h.level === 'manager' ? '值班经理' : '质量安全主管'}
+                      </span>
+                      <span className="text-dashboard-muted">→</span>
+                      <span className="text-white">{h.assignee}</span>
+                      <span className="text-dashboard-muted ml-auto font-mono">{h.time}</span>
+                      {idx === 0 && <span className="text-risk-low">(当前)</span>}
+                    </div>
+                  ))}
                 </div>
               </div>
             )}

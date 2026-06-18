@@ -6,15 +6,18 @@ interface BadgeProps {
   variant?: 'default' | 'risk';
   level?: RiskLevel;
   status?: 'open' | 'processing' | 'closed';
+  size?: 'sm' | 'md';
   children?: React.ReactNode;
   className?: string;
 }
 
-export default function Badge({ variant = 'default', level, status, children, className }: BadgeProps) {
+export default function Badge({ variant = 'default', level, status, size = 'md', children, className }: BadgeProps) {
+  const sizeClass = size === 'sm' ? 'text-[10px] px-1.5 py-0.5' : '';
+
   if (variant === 'risk' && level) {
     const colors = getRiskLevelColor(level);
     return (
-      <span className={cn('badge', colors.bg, colors.text, className)}>
+      <span className={cn('badge', colors.bg, colors.text, sizeClass, className)}>
         {children || getRiskLevelLabel(level)}
       </span>
     );
@@ -32,14 +35,14 @@ export default function Badge({ variant = 'default', level, status, children, cl
       closed: '已闭环',
     };
     return (
-      <span className={cn('badge', statusColors[status], className)}>
+      <span className={cn('badge', statusColors[status], sizeClass, className)}>
         {children || statusLabels[status]}
       </span>
     );
   }
 
   return (
-    <span className={cn('badge bg-dashboard-border text-dashboard-text', className)}>
+    <span className={cn('badge bg-dashboard-border text-dashboard-text', sizeClass, className)}>
       {children}
     </span>
   );

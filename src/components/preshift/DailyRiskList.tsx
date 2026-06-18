@@ -22,7 +22,7 @@ interface DailyRiskListProps {
 }
 
 export default function DailyRiskList({ formId, onPromote }: DailyRiskListProps) {
-  const { dailyRisks, toggleDailyRisk, preShiftForms, promoteDailyRiskToTracking } = useRiskStore();
+  const { dailyRisks, toggleDailyRisk, preShiftForms, promoteDailyRiskToTracking, riskCards } = useRiskStore();
 
   const filteredRisks = formId
     ? dailyRisks.filter((r) => r.formId === formId)
@@ -31,6 +31,10 @@ export default function DailyRiskList({ formId, onPromote }: DailyRiskListProps)
   const relatedForm = formId ? preShiftForms.find((f) => f.id === formId) : null;
 
   const allChecked = filteredRisks.length > 0 && filteredRisks.every((r) => r.isChecked);
+
+  const getPromotedRisk = (promotedId: string) => {
+    return riskCards.find((r) => r.id === promotedId);
+  };
 
   const handlePromote = (riskId: string) => {
     const promotedId = promoteDailyRiskToTracking(riskId);
@@ -120,6 +124,7 @@ export default function DailyRiskList({ formId, onPromote }: DailyRiskListProps)
             index={index}
             onToggle={() => toggleDailyRisk(risk.id)}
             onPromote={handlePromote}
+            promotedRisk={risk.promotedRiskId ? getPromotedRisk(risk.promotedRiskId) : undefined}
           />
         ))}
       </div>
@@ -142,11 +147,13 @@ function RiskItem({
   index,
   onToggle,
   onPromote,
+  promotedRisk,
 }: {
   risk: DailyRisk;
   index: number;
   onToggle: () => void;
   onPromote: (riskId: string) => void;
+  promotedRisk?: import('@/types').RiskCardData;
 }) {
   const staggerClass = `animate-stagger-${Math.min((index % 10) + 1, 10)}`;
 
@@ -192,6 +199,20 @@ function RiskItem({
         >
           {risk.description}
         </p>
+        {promotedRisk && (
+          <div className="flex items-center gap-2 mt-1">
+            <Badge status={promotedRisk.status} size="sm" />
+            {promotedRisk.isOverdue && (
+              <span className="text-[10px] text-risk-high font-medium flex items-center gap-0.5">
+                <AlertTriangle size={10} />
+                超时
+              </span>
+            )}
+            <span className="text-[10px] text-dashboard-muted font-mono">
+              时限 {promotedRisk.releaseDeadline}
+            </span>
+          </div>
+        )}
       </div>
 
       <Badge variant="risk" level={risk.level}>

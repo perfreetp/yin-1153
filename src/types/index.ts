@@ -31,6 +31,14 @@ export interface RiskCardData {
   escalationLevel?: EscalationLevel;
   escalationAssignee?: string;
   escalatedAt?: string;
+  escalationHistory?: Array<{
+    id: string;
+    level: EscalationLevel;
+    assignee: string;
+    operator: string;
+    time: string;
+    note?: string;
+  }>;
   sourceWorkCardNo?: string;
   sourceFormId?: string;
 }
@@ -84,6 +92,13 @@ export interface HandoverRecord {
   scopeBaseId: string;
   scopeLocationType: LocationType | 'all';
   scopeLocationId: string | null;
+  supplementaryRecords?: Array<{
+    id: string;
+    riskIds: string[];
+    operator: string;
+    time: string;
+    note?: string;
+  }>;
 }
 
 export interface RiskTypeMeta {
